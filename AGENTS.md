@@ -22,7 +22,7 @@ loads [`.claude/rules/`](.claude/rules/). Cursor also loads
 - **Mandatory scope first.** Finish reqs 1–6 before any I.* improvement.
 - **Decide, then implement.** Do not one-shot the brief. State assumptions
   and the discovery questions a real engagement would still need.
-- **Git is local until asked.** Branch `N-1-do-smth`, commit `N: Do smth`.
+- **Git is local until asked.** Branch `N-1-do-smth`, commit `N-1: Do smth`.
   Never push unless the user explicitly asks. See
   [`.agents/rules/git-workflow.md`](.agents/rules/git-workflow.md).
 
