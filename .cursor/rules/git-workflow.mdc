@@ -8,8 +8,14 @@ alwaysApply: true
 Number work sequentially. The human form is `N: Do smth` (example:
 `1: Add agent rules and project brief`).
 
-Git **forbids** `:` and spaces in branch names, so the branch is the same
-number in kebab-case: `N-do-smth` (example: `1-add-agent-rules-and-brief`).
+Git **forbids** `:` and spaces in branch names. Branches are
+`N-1-do-smth`:
+- `N` is a literal prefix (do not replace it with the work number)
+- `1` is the 1-based node — the index of this branch related to N
+- `do-smth` is the kebab-case summary
+
+Example: `N-1-add-agent-rules-and-brief` is the first node. The next
+branch is `N-2-...`.
 
 - Create a new local branch for each slice of work. Do not pile unrelated
   changes onto `main`.
