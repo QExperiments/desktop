@@ -1,0 +1,53 @@
+---
+description: QVAC SDK usage for the Meridian on-device assistant
+alwaysApply: true
+---
+
+# QVAC SDK
+
+Package: `@qvac/sdk`. Runtimes: **Node.js** and **Bare**. Docs:
+https://docs.qvac.tether.io — for agents, https://docs.qvac.tether.io/llms-full.txt
+
+Sibling `fibiom-electron` shows a working Electron integration. Copy **SDK
+usage**, not the app: `loadModel` / `completion` / `embed` / `transcribe` /
+`unloadModel`, streaming events, tool loops, plugin tree-shaking.
+
+## Lifecycle (req 1.3–1.4)
+
+`loadModel` → inference (`completion` / `embed` / `transcribe` / TTS) →
+`unloadModel` → `close`. Cancel in-flight loads and completions by
+`requestId`.
+
+## Models (req 1.2, 5.2)
+
+Discover/download from at least two of: QVAC registry
+(`modelRegistryList` / `modelRegistrySearch`), filesystem, HTTPS, `pear://`.
+Select model and quantization at runtime from device capability
+(`getSystemResources`, `assessModelFit`). Default to something that can live
+on 8 GB RAM.
+
+## RAG (req 2)
+
+`ragChunk()` + `embed()` into a persistent local vector store (SQLite-Vector,
+LanceDB, Chroma, or similar). Schema dimensionality must match the embedding
+model. Stream tokens. Attach citations (`file` relative to corpus root).
+
+## Tools (req 3)
+
+Load a **tool-capable** model. Declare tools with **Zod** schemas in the
+`tools` array on `completion()`. Drive the loop from structured tool-call
+events — do not regex-scrape model text. Required: `list_documents`; stock
+lookup from the provided `stock-tool.zip`.
+
+## Voice, vision, P2P (req 4–5)
+
+ASR via whispercpp and/or parakeet (`transcribe` and/or `transcribeStream`).
+Hands-free: speech → grounded answer → TTS. Image + text in one VLM context.
+P2P: `startQVACProvider()` on the strong machine;
+`loadModel({ delegate: { providerPublicKey, fallbackToLocal: true } })` on
+the field laptop.
+
+## Footprint (req 6.2–6.3)
+
+Declare only used plugins/addons in `qvac.config.*`. Produce a tree-shaken
+build. Reuse KV cache across turns with a per-session key.
