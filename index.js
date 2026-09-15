@@ -1,10 +1,33 @@
+import { writeFile, mkdir, rm } from 'node:fs/promises'
+import { dirname } from 'node:path'
 import { config } from './src/config.js'
-import Fastify from 'fastify'
+import { createServer } from './src/http/server.js'
+import { createRuntime } from './src/runtime/index.js'
 
-const app = Fastify({ logger: true })
+const runtime = createRuntime()
+const app = createServer(runtime)
 
-// Readiness gate: the eval harness polls this path until it returns 200.
-// The model runtime commit replaces the stub with the real state.
-app.get(`${config.apiPrefix}/models`, (_req, reply) => reply.code(503).send({ error: { message: 'runtime not wired yet' } }))
+const shutdown = async (signal) => {
+  app.log.info({ signal }, 'shutting down')
+  await app.close().catch((error) => app.log.error(error))
+  await runtime.stop().catch((error) => app.log.error(error))
+  await rm(config.pidPath, { force: true })
+  process.exit(0)
+}
 
-await app.listen({ host: config.host, port: config.port })
+for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => shutdown(signal))
+
+try {
+  // Listen before loading: the harness can then poll /v1/models and watch it
+  // turn from 503 into 200 instead of waiting on a refused connection.
+  await app.listen({ host: config.host, port: config.port })
+  await mkdir(dirname(config.pidPath), { recursive: true })
+  await writeFile(config.pidPath, `${process.pid}\n`)
+  const state = await runtime.start()
+  app.log.info({ tier: state.tier, models: state.models }, 'ready')
+} catch (error) {
+  app.log.error(error)
+  await runtime.stop().catch(() => {})
+  await rm(config.pidPath, { force: true })
+  process.exit(1)
+}

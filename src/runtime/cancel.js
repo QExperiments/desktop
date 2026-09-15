@@ -13,11 +13,12 @@ export const createCancelRegistry = ({ cancel }) => {
   // For SDK calls that return a decorated promise exposing requestId up front.
   const run = async (meta, start) => {
     const op = start()
-    add(op.requestId, meta)
+    const { requestId } = op
+    if (requestId) add(requestId, meta)
     try {
       return await op
     } finally {
-      drop(op.requestId)
+      if (requestId) drop(requestId)
     }
   }
 

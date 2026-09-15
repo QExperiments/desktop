@@ -8,8 +8,10 @@ const abs = (rel) => fileURLToPath(new URL(rel, new URL('../', import.meta.url))
 const base = new URL(contract.baseUrl)
 
 export const config = {
-  host: base.hostname,
-  port: Number(base.port),
+  // qvac-eval.json is the contract; the env vars exist so a developer can run a
+  // second instance next to something else already on the port.
+  host: process.env.HOST ?? base.hostname,
+  port: Number(process.env.PORT ?? base.port),
   apiPrefix: base.pathname.replace(/\/$/, ''),
   readyTimeoutSec: contract.readyTimeoutSec,
   chatModel: contract.models.chat,
