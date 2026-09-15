@@ -17,6 +17,7 @@ export const waitForPeer = async (providerPublicKey, log = logger) => {
           timeout: config.heartbeatTimeoutMs,
         },
       })
+
       logInfo(log, { attempt, providerPublicKey }, 'provider heartbeat ok')
       return true
     } catch (error) {
