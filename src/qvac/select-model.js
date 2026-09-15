@@ -5,21 +5,17 @@ import {
 } from '@qvac/sdk'
 import { GiB } from '../config.js'
 
-function metricValue(metric) {
-  return metric?.status === 'supported' ? metric.value : undefined
-}
+const metricValue = (metric) => (metric?.status === 'supported' ? metric.value : undefined)
 
-function ramBytes(resources) {
-  return metricValue(resources?.capabilities?.memory?.totalBytes)
-}
+const ramBytes = (resources) => metricValue(resources?.capabilities?.memory?.totalBytes)
 
-function hasDedicatedGpu(resources) {
+const hasDedicatedGpu = (resources) => {
   const gpus = metricValue(resources?.capabilities?.gpus)
   if (!Array.isArray(gpus)) return false
   return gpus.some((gpu) => metricValue(gpu.unifiedMemory) === false)
 }
 
-export function describeResources(resources) {
+export const describeResources = (resources) => {
   const bytes = ramBytes(resources)
   return {
     ramGiB: bytes != null ? Number((bytes / GiB).toFixed(2)) : null,
@@ -27,11 +23,7 @@ export function describeResources(resources) {
   }
 }
 
-/**
- * Pick a chat GGUF that can actually run on this device (Req 5.2).
- * 8 GB + iGPU (2019 laptop) stays on 0.6B Q4; a stronger box can take 4B.
- */
-export function selectModel(resources, { assumeStrongPeer = false } = {}) {
+export const selectModel = (resources, { assumeStrongPeer = false } = {}) => {
   if (assumeStrongPeer) {
     return {
       id: 'QWEN3_4B_INST_Q4_K_M',

@@ -1,7 +1,7 @@
 import { writeFile, rm } from 'node:fs/promises'
 import Fastify from 'fastify'
 import { config } from './src/config.js'
-import { registerConsumerRoutes } from './src/http/routes.js'
+import { registerConsumerRoutes } from './src/routes.js'
 import { getSession, shutdownSession } from './src/qvac/session.js'
 
 const fastify = Fastify({ logger: true })

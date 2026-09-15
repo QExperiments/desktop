@@ -1,8 +1,8 @@
 import { completion } from '@qvac/sdk'
-import { config } from '../config.js'
-import { getSession } from '../qvac/session.js'
+import { config } from './config.js'
+import { getSession } from './qvac/session.js'
 
-function toHistory(messages) {
+const toHistory = (messages) => {
   if (!Array.isArray(messages) || messages.length === 0) {
     return [{ role: 'user', content: 'Hello' }]
   }
@@ -13,7 +13,7 @@ function toHistory(messages) {
   }))
 }
 
-export async function registerConsumerRoutes(fastify) {
+export const registerConsumerRoutes = (fastify) => {
   fastify.get('/', async () => ({ ok: true, service: 'meridian-consumer' }))
 
   fastify.get('/health', async () => {
@@ -21,7 +21,7 @@ export async function registerConsumerRoutes(fastify) {
     return { ok: true, ...session }
   })
 
-  async function modelsPayload() {
+  const modelsPayload = async () => {
     const session = await getSession(fastify.log)
     return {
       object: 'list',

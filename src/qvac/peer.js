@@ -2,11 +2,9 @@ import { heartbeat } from '@qvac/sdk'
 import { config } from '../config.js'
 import { logInfo, logWarn } from '../logger.js'
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
-export async function waitForPeer(providerPublicKey, log = console) {
+export const waitForPeer = async (providerPublicKey, log = console) => {
   if (!providerPublicKey) return false
 
   let lastError

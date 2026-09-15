@@ -12,24 +12,21 @@ import { describeResources, selectModel } from './select-model.js'
 
 let sessionPromise
 
-function progressLogger(log) {
-  return (p) => {
-    const mb = (n) => (n / 1e6).toFixed(1)
-    const pct = Number(p.percentage ?? 0)
-    const line = `model download ${pct.toFixed(0)}% (${mb(p.downloaded ?? 0)}/${mb(p.total ?? 0)} MB)`
-    logInfo(log, { percentage: pct }, line)
-  }
+const progressLogger = (log) => (p) => {
+  const mb = (n) => (n / 1e6).toFixed(1)
+  const pct = Number(p.percentage ?? 0)
+  const line = `model download ${pct.toFixed(0)}% (${mb(p.downloaded ?? 0)}/${mb(p.total ?? 0)} MB)`
+  logInfo(log, { percentage: pct }, line)
 }
 
-async function loadOnce({ modelSrc, delegate, log }) {
-  return loadModel({
+const loadOnce = ({ modelSrc, delegate, log }) =>
+  loadModel({
     modelSrc,
     delegate,
     onProgress: progressLogger(log),
   })
-}
 
-async function startSession(log = console) {
+const startSession = async (log = console) => {
   const resources = await getSystemResources({ sample: true })
   const hardware = describeResources(resources)
   const localPick = selectModel(resources)
@@ -98,14 +95,14 @@ async function startSession(log = console) {
   return session
 }
 
-export function getSession(log) {
+export const getSession = (log) => {
   if (!sessionPromise) {
     sessionPromise = startSession(log)
   }
   return sessionPromise
 }
 
-export async function shutdownSession() {
+export const shutdownSession = async () => {
   if (!sessionPromise) {
     await close()
     return
