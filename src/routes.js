@@ -14,8 +14,10 @@ const toHistory = (messages) => {
 }
 
 export const registerConsumerRoutes = (fastify) => {
+  // Liveness: process is up, model may not be ready yet.
   fastify.get('/', async () => ({ ok: true, service: 'meridian-consumer' }))
 
+  // Session snapshot: loaded model, local vs delegated, hardware pick.
   fastify.get('/health', async () => {
     const session = await getSession(fastify.log)
     return { ok: true, ...session }
@@ -37,9 +39,12 @@ export const registerConsumerRoutes = (fastify) => {
     }
   }
 
+  // OpenAI-style model list (short path used by some local clients).
   fastify.get('/models', modelsPayload)
+  // Same list under the /v1 prefix eval and OpenAI clients expect.
   fastify.get('/v1/models', modelsPayload)
 
+  // Chat: run the loaded LLM on messages; JSON reply or SSE if stream=true.
   fastify.post('/v1/chat/completions', async (request, reply) => {
     const session = await getSession(fastify.log)
     const body = request.body ?? {}
@@ -60,6 +65,7 @@ export const registerConsumerRoutes = (fastify) => {
         'cache-control': 'no-cache',
         connection: 'keep-alive',
       })
+
       const id = `chatcmpl-${Date.now()}`
       for await (const event of run.events) {
         if (event.type !== 'contentDelta' || !event.text) continue
@@ -70,10 +76,13 @@ export const registerConsumerRoutes = (fastify) => {
           model: body.model || config.chatModel,
           choices: [{ index: 0, delta: { content: event.text }, finish_reason: null }],
         }
+
         reply.raw.write(`data: ${JSON.stringify(chunk)}\n\n`)
       }
+
       reply.raw.write('data: [DONE]\n\n')
       reply.raw.end()
+
       return reply
     }
 

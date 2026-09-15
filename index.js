@@ -13,7 +13,9 @@ const shutdown = async () => {
   } catch (error) {
     fastify.log.error(error)
   }
+
   await rm(config.pidPath, { force: true })
+
   try {
     await fastify.close()
   } catch {
