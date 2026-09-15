@@ -1,0 +1,149 @@
+{
+  "version": 1,
+  "note": "Owned by M-02. Tiers are picked from total RAM minus osReserveBytes; see src/runtime/capability.js.",
+  "tiers": {
+    "S": {
+      "minBudgetBytes": 0,
+      "label": "constrained device: load one model at a time"
+    },
+    "M": {
+      "minBudgetBytes": 4294967296,
+      "label": "target fleet device: 2019 laptop, iGPU, 8 GB RAM"
+    },
+    "L": {
+      "minBudgetBytes": 10737418240,
+      "label": "workstation or P2P provider box"
+    }
+  },
+  "roles": {
+    "chat": {
+      "addon": "llamacpp-completion",
+      "modelType": "llamacpp-completion",
+      "required": true,
+      "resident": true,
+      "models": {
+        "S": {
+          "constant": "QWEN3_600M_INST_Q4",
+          "file": "Qwen3-0.6B-Q4_0.gguf",
+          "bytes": 382156480,
+          "sha256": "33bcc57074ec7b6eada5a90651ee546ec0c2b271002c22baf9f1b2dd1e8f75cb",
+          "https": "https://huggingface.co/unsloth/Qwen3-0.6B-GGUF/resolve/50968a4468ef4233ed78cd7c3de230dd1d61a56b/Qwen3-0.6B-Q4_0.gguf"
+        },
+        "M": {
+          "constant": "QWEN3_5_2B_MULTIMODAL_Q4_K_M",
+          "file": "Qwen3.5-2B-Q4_K_M.gguf",
+          "bytes": 1280835840,
+          "sha256": "aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223",
+          "https": "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/f6d5376be1edb4d416d56da11e5397a961aca8ae/Qwen3.5-2B-Q4_K_M.gguf"
+        },
+        "L": {
+          "constant": "QWEN3_4B_INST_Q4_K_M",
+          "file": "Qwen3-4B-Q4_K_M.gguf",
+          "bytes": 2497280256,
+          "sha256": "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5"
+        }
+      }
+    },
+    "embed": {
+      "addon": "embeddings",
+      "modelType": "llamacpp-embedding",
+      "required": true,
+      "resident": true,
+      "models": {
+        "S": {
+          "constant": "EMBEDDINGGEMMA_300M_Q8_0",
+          "file": "embeddinggemma-300M-Q8_0.gguf",
+          "bytes": 328577056,
+          "sha256": "a0f7b4e13c397a6e1b32c2de75b1f65a14c92ec524d5f674d94a4290a1c4969b",
+          "https": "https://huggingface.co/unsloth/embeddinggemma-300m-GGUF/resolve/6661a6504c30d8304af13455cb4a5d4f5bc6011f/embeddinggemma-300M-Q8_0.gguf"
+        },
+        "M": {
+          "constant": "EMBEDDINGGEMMA_300M_Q8_0",
+          "file": "embeddinggemma-300M-Q8_0.gguf",
+          "bytes": 328577056,
+          "sha256": "a0f7b4e13c397a6e1b32c2de75b1f65a14c92ec524d5f674d94a4290a1c4969b",
+          "https": "https://huggingface.co/unsloth/embeddinggemma-300m-GGUF/resolve/6661a6504c30d8304af13455cb4a5d4f5bc6011f/embeddinggemma-300M-Q8_0.gguf"
+        },
+        "L": {
+          "constant": "EMBEDDINGGEMMA_300M_Q8_0",
+          "file": "embeddinggemma-300M-Q8_0.gguf",
+          "bytes": 328577056,
+          "sha256": "a0f7b4e13c397a6e1b32c2de75b1f65a14c92ec524d5f674d94a4290a1c4969b",
+          "https": "https://huggingface.co/unsloth/embeddinggemma-300m-GGUF/resolve/6661a6504c30d8304af13455cb4a5d4f5bc6011f/embeddinggemma-300M-Q8_0.gguf"
+        }
+      }
+    },
+    "asr": {
+      "addon": "whispercpp-transcription",
+      "modelType": "whispercpp-transcription",
+      "required": false,
+      "resident": false,
+      "models": {
+        "S": {
+          "constant": "WHISPER_TINY_Q8_0",
+          "file": "ggml-tiny-q8_0.bin",
+          "bytes": 43537433,
+          "sha256": "c2085835d3f50733e2ff6e4b41ae8a2b8d8110461e18821b09a15c40c42d1cca",
+          "https": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-tiny-q8_0.bin"
+        },
+        "M": {
+          "constant": "WHISPER_BASE_Q8_0",
+          "file": "ggml-base-q8_0.bin",
+          "bytes": 81768585,
+          "sha256": "c577b9a86e7e048a0b7eada054f4dd79a56bbfa911fbdacf900ac5b567cbb7d9",
+          "https": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base-q8_0.bin"
+        },
+        "L": {
+          "constant": "WHISPER_SMALL_Q8_0",
+          "file": "ggml-small-q8_0.bin",
+          "bytes": 264464607,
+          "sha256": "49c8fb02b65e6049d5fa6c04f81f53b867b5ec9540406812c643f177317f779f",
+          "https": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small-q8_0.bin"
+        }
+      }
+    },
+    "tts": {
+      "addon": "tts",
+      "modelType": "onnx-tts",
+      "required": false,
+      "resident": false,
+      "models": {
+        "S": {
+          "constant": "TTS_MULTILINGUAL_SUPERTONIC2_Q4_0",
+          "file": "supertonic2-q4_0.gguf",
+          "bytes": 132008192,
+          "sha256": "ae65553d8841fbff7b1674faa32ff2d4235d8f6501f1e4aba87b17e01c4ab00e"
+        },
+        "M": {
+          "constant": "TTS_MULTILINGUAL_SUPERTONIC2_Q4_0",
+          "file": "supertonic2-q4_0.gguf",
+          "bytes": 132008192,
+          "sha256": "ae65553d8841fbff7b1674faa32ff2d4235d8f6501f1e4aba87b17e01c4ab00e"
+        },
+        "L": {
+          "constant": "TTS_MULTILINGUAL_SUPERTONIC2_Q8_0",
+          "file": "supertonic2-q8_0.gguf",
+          "bytes": 251845952,
+          "sha256": "f02eec8230184523d88a85e16ff715f002e802322a89e56455693993d22a4ecf"
+        }
+      }
+    },
+    "vision": {
+      "addon": "llamacpp-completion",
+      "modelType": "llamacpp-completion",
+      "required": false,
+      "resident": false,
+      "note": "projection file paired with the multimodal chat model; S and L pending M-02",
+      "models": {
+        "M": {
+          "constant": "MMPROJ_QWEN3_5_2B_MULTIMODAL_Q8_0",
+          "file": "Qwen3.5-2B.mmproj-Q8_0.gguf",
+          "bytes": 364664384,
+          "sha256": "526dbf85f350baf3a5107b1f14e629e94571c7cbab4277476fbdaaa8c4a31a64",
+          "https": "https://huggingface.co/mradermacher/Qwen3.5-2B-GGUF/resolve/33cc6944e40cb93e38332cd46b2a6e3c6acf081e/Qwen3.5-2B.mmproj-Q8_0.gguf"
+        }
+      }
+    }
+  },
+  "osReserveBytes": 3758096384
+}
