@@ -100,13 +100,23 @@
           "sha256": "49c8fb02b65e6049d5fa6c04f81f53b867b5ec9540406812c643f177317f779f",
           "https": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small-q8_0.bin"
         }
+      },
+      "modelConfig": {
+        "audio_format": "f32le",
+        "strategy": "greedy",
+        "language": "auto"
       }
     },
     "tts": {
       "addon": "tts",
-      "modelType": "onnx-tts",
+      "modelType": "tts",
       "required": false,
       "resident": false,
+      "modelConfig": {
+        "ttsEngine": "supertonic",
+        "language": "en",
+        "outputSampleRate": 24000
+      },
       "models": {
         "S": {
           "constant": "TTS_MULTILINGUAL_SUPERTONIC2_Q4_0",
@@ -129,18 +139,62 @@
       }
     },
     "vision": {
-      "addon": "llamacpp-completion",
+      "addon": "llm",
       "modelType": "llamacpp-completion",
       "required": false,
       "resident": false,
-      "note": "projection file paired with the multimodal chat model; S and L pending M-02",
+      "note": "paired with visionProjection; loaded on demand and unloaded after the answer",
       "models": {
+        "S": {
+          "constant": "SMOLVLM2_500M_MULTIMODAL_Q8_0",
+          "file": "SmolVLM2-500M-Video-Instruct-Q8_0.gguf",
+          "bytes": 436808704,
+          "sha256": "6f67b8036b2469fcd71728702720c6b51aebd759b78137a8120733b4d66438bc",
+          "https": "https://huggingface.co/ggml-org/SmolVLM2-500M-Video-Instruct-GGUF/resolve/ccd7aae53bcb1997355c2f094959e72b3642ce17/SmolVLM2-500M-Video-Instruct-Q8_0.gguf"
+        },
+        "M": {
+          "constant": "QWEN3_5_2B_MULTIMODAL_Q4_K_M",
+          "file": "Qwen3.5-2B-Q4_K_M.gguf",
+          "bytes": 1280835840,
+          "sha256": "aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223",
+          "https": "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/f6d5376be1edb4d416d56da11e5397a961aca8ae/Qwen3.5-2B-Q4_K_M.gguf"
+        },
+        "L": {
+          "constant": "QWEN3_5_4B_MULTIMODAL_Q4_K_M",
+          "file": "Qwen3.5-4B-Q4_K_M.gguf",
+          "bytes": 2740937888,
+          "sha256": "00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4",
+          "https": "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/e87f176479d0855a907a41277aca2f8ee7a09523/Qwen3.5-4B-Q4_K_M.gguf"
+        }
+      },
+      "projectionRole": "visionProjection"
+    },
+    "visionProjection": {
+      "addon": "llm",
+      "modelType": "llamacpp-completion",
+      "required": false,
+      "resident": false,
+      "models": {
+        "S": {
+          "constant": "MMPROJ_SMOLVLM2_500M_MULTIMODAL_Q8_0",
+          "file": "mmproj-SmolVLM2-500M-Video-Instruct-Q8_0.gguf",
+          "bytes": 108785184,
+          "sha256": "921dc7e259f308e5b027111fa185efcbf33db13f6e35749ddf7f5cdb60ef520b",
+          "https": "https://huggingface.co/ggml-org/SmolVLM2-500M-Video-Instruct-GGUF/resolve/ccd7aae53bcb1997355c2f094959e72b3642ce17/mmproj-SmolVLM2-500M-Video-Instruct-Q8_0.gguf"
+        },
         "M": {
           "constant": "MMPROJ_QWEN3_5_2B_MULTIMODAL_Q8_0",
           "file": "Qwen3.5-2B.mmproj-Q8_0.gguf",
           "bytes": 364664384,
           "sha256": "526dbf85f350baf3a5107b1f14e629e94571c7cbab4277476fbdaaa8c4a31a64",
           "https": "https://huggingface.co/mradermacher/Qwen3.5-2B-GGUF/resolve/33cc6944e40cb93e38332cd46b2a6e3c6acf081e/Qwen3.5-2B.mmproj-Q8_0.gguf"
+        },
+        "L": {
+          "constant": "MMPROJ_QWEN3_5_4B_MULTIMODAL_Q8_0",
+          "file": "Qwen3.5-4B.mmproj-Q8_0.gguf",
+          "bytes": 366894656,
+          "sha256": "40a4f07d7bbdbb43011d6cf35ef751e4b1829ff47ee8aa4964c6296f571725ad",
+          "https": "https://huggingface.co/mradermacher/Qwen3.5-4B-GGUF/resolve/1a5df2c0cba51dae8ac5888420360d8703707171/Qwen3.5-4B.mmproj-Q8_0.gguf"
         }
       }
     }
