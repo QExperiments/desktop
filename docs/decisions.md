@@ -76,3 +76,35 @@ absolute path per weight in our manifest. Files fetched over HTTPS live in
 **Consequences.** One machine downloads each weight once for every
 checkout. `data/` holds only the manifest, our HTTPS downloads, the PID
 file and, from Stage 2, the index.
+
+## ADR-006 — Speech and vision load on demand and unload when idle
+
+**Context.** Req #4 adds transcription, speech and a vision model to a
+machine that already holds a chat model and embeddings in 8 GB of RAM.
+
+**Decision.** Chat and embeddings are resident. ASR, TTS, VAD and the
+vision model are refcounted, loaded on the first request that needs them
+and unloaded five minutes after the last one
+(`MERIDIAN_IDLE_UNLOAD_MS`). Loads stay serialized, so two large models
+never decode at once. A role can name companion models by config key,
+which is how the VLM gets its projection file and Whisper gets the VAD
+model a live stream needs.
+
+**Consequences.** The first voice request pays a load; the rest do not.
+Peak memory is the resident pair plus one on-demand model, not all of
+them. The e2e suite asserts the memory comes back.
+
+## ADR-007 — The voice loop goes through the same answer seam as chat
+
+**Context.** Req 4.2 wants a hands-free loop that returns a grounded
+answer. Grounding is not built yet, and a second answer path would mean
+retrofitting retrieval in two places later.
+
+**Decision.** `src/chat/answer.js` is the only place a question becomes
+an answer. It already returns `{ text, citations }`, with citations empty
+until the retrieval stage fills it. The model's `<think>` block is
+captured separately so reasoning is never spoken or shown.
+
+**Consequences.** Voice answers are currently ungrounded, and the README
+says so. When retrieval lands, the loop becomes grounded without a change
+to the audio routes.

@@ -11,16 +11,51 @@ Tether. The client, Meridian Components, is fictional.
 
 ## What works today
 
-This branch covers Req #1 — the model runtime. It provisions weights,
-picks a tier for the machine, loads and unloads models, and cancels work
-in flight. Retrieval, citations, tools, voice, vision and P2P delegation
-arrive in later stages; see [ARCHITECTURE.md](ARCHITECTURE.md) for the
-plan and [docs/decisions.md](docs/decisions.md) for why things are the way
-they are.
+This branch covers Req #1, the model runtime, and Req #4, voice and
+vision. It provisions weights, picks a tier for the machine, loads and
+unloads models, cancels work in flight, transcribes speech in several
+languages, speaks answers back and answers questions about a photograph.
+Retrieval, citations, tools and P2P delegation arrive in later stages;
+see [ARCHITECTURE.md](ARCHITECTURE.md) for the plan and
+[docs/decisions.md](docs/decisions.md) for why things are the way they
+are.
 
 `POST /v1/chat/completions` answers **501** on purpose. Req 6.1.1 requires
 that route to run retrieval and tools, and a placeholder proxy is the
 shortcut that ends up shipping.
+
+## Voice and vision
+
+Speech and vision models are optional: fetch them with `--all`, and the
+server loads each one on the first request and unloads it five minutes
+after the last. The fleet laptop cannot hold a vision model next to the
+chat model, so it does not try.
+
+```bash
+npm run models:fetch -- --all
+
+# speak a sentence
+curl -X POST http://127.0.0.1:11434/v1/audio/speech \
+  -H 'content-type: application/json' \
+  -d '{"input":"Lead time is six weeks.","language":"en"}' -o reply.wav
+
+# transcribe one, in whichever language it was spoken
+curl -X POST http://127.0.0.1:11434/v1/audio/transcriptions -F file=@reply.wav
+
+# the hands-free loop: speech in, answer out, spoken back
+curl -X POST http://127.0.0.1:11434/v1/audio/ask -F language=en -F file=@question.wav
+
+# a photographed nameplate or broken part
+curl -X POST http://127.0.0.1:11434/v1/images/ask \
+  -F 'question=What is the part number?' -F file=@nameplate.png
+```
+
+The answers the loop speaks are not grounded in the corpus yet: retrieval
+lands in the next stage, and every answer already carries the `citations`
+array it will fill.
+
+Languages are detected rather than declared. Transcription quality
+depends on the tier: whisper-tiny on S, whisper-base on M.
 
 ## Requirements
 
@@ -73,6 +108,7 @@ bundle built elsewhere still starts.
 | Path | Contents |
 | --- | --- |
 | `~/.qvac/models` | model weights, downloaded once per machine |
+| a private temp file | an uploaded recording or photo, deleted as soon as it is read |
 | `data/models/manifest.json` | role, tier, source, path, size, sha256 |
 | `data/models/https/` | weights fetched over HTTPS rather than the registry |
 | `data/serve.pid` | the running server's PID |
@@ -93,6 +129,8 @@ npm run test:e2e  # needs MERIDIAN_E2E=1 and a completed models:fetch
 | --- | --- |
 | `src/runtime/` | the only code that imports `@qvac/sdk` |
 | `src/http/` | OpenAI-compatible surface; talks to the runtime, never the SDK |
+| `src/chat/answer.js` | the one seam a question passes through to become an answer |
+| `src/audio/wav.js` | PCM in and out of the RIFF container every client expects |
 | `scripts/models-fetch.js` | provisioning, the one step that uses the network |
 | `models.json` | roles, tiers, checksums, mirrors |
 | `qvac-eval.json` | the contract the Tether harness runs |
