@@ -12,3 +12,4 @@ AGENTS.override.md
 .env.*
 context/
 data/
+docs/*.html
