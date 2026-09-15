@@ -14,8 +14,18 @@ describe('targetsFor', () => {
     assert.ok(targetsFor('M', { optional: true }).length > targetsFor('M').length)
   })
 
-  it('skips a role that has no model for the tier', () => {
-    assert.ok(!targetsFor('S', { optional: true }).some((target) => target.role === 'vision'))
+  it('never returns a role the tier has no model for', () => {
+    for (const tier of Object.keys(catalog.tiers)) {
+      for (const target of targetsFor(tier, { optional: true })) {
+        assert.ok(catalog.roles[target.role].models[tier], `${target.role} has no ${tier} model`)
+      }
+    }
+  })
+
+  it('pairs every vision model with a projection for the same tier', () => {
+    const { projectionRole, models } = catalog.roles.vision
+    assert.equal(projectionRole, 'visionProjection')
+    for (const tier of Object.keys(models)) assert.ok(catalog.roles[projectionRole].models[tier], `no projection for ${tier}`)
   })
 })
 

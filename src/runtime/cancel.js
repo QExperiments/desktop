@@ -10,13 +10,14 @@ export const createCancelRegistry = ({ cancel }) => {
 
   const drop = (requestId) => inflight.delete(requestId)
 
-  // For SDK calls that return a decorated promise exposing requestId up front.
-  const run = async (meta, start) => {
+  // For SDK calls that expose requestId up front, either on a decorated promise
+  // or on a run object whose payload `take` picks out.
+  const run = async (meta, start, take = (op) => op) => {
     const op = start()
     const { requestId } = op
     if (requestId) add(requestId, meta)
     try {
-      return await op
+      return await take(op)
     } finally {
       if (requestId) drop(requestId)
     }

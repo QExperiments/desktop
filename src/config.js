@@ -26,4 +26,7 @@ export const config = {
   importDir: process.env.MERIDIAN_MODELS_DIR ?? '',
   tierOverride: process.env.MERIDIAN_TIER?.toUpperCase() ?? '',
   logContent: process.env.LOG_CONTENT === '1',
+  // On-demand models (speech, vision) give their memory back this long after
+  // the last request. The fleet laptop cannot hold them next to the chat model.
+  idleUnloadMs: Number(process.env.MERIDIAN_IDLE_UNLOAD_MS ?? 5 * 60_000),
 }

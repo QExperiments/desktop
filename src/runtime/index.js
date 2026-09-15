@@ -2,10 +2,10 @@
 // interface, which is what keeps the HTTP layer from becoming a model proxy.
 import * as sdk from '@qvac/sdk'
 import { config } from '../config.js'
+import { logger } from '../logger.js'
 import { createCancelRegistry } from './cancel.js'
 import { selectTier } from './capability.js'
 import { catalog, entryFor, provisionedTier, readManifest, targetsFor } from './models.js'
-import { logger } from '../logger.js'
 
 const TIERS = ['L', 'M', 'S']
 const FETCH_HINT = 'run `npm run models:fetch`'
@@ -13,6 +13,7 @@ const FETCH_HINT = 'run `npm run models:fetch`'
 export const createRuntime = ({ log = logger } = {}) => {
   const registry = createCancelRegistry({ cancel: sdk.cancel })
   const loaded = new Map()
+  const idleTimers = new Map()
   let manifest = null
   let state = { ready: false, tier: null, hardware: null, reason: null }
   let chain = Promise.resolve()
@@ -26,11 +27,23 @@ export const createRuntime = ({ log = logger } = {}) => {
     return next
   }
 
+  const srcOf = (entry) => (entry.source === 'registry' ? sdk[entry.constant] : entry.path)
+
+  const optionsFor = (entry) => {
+    const spec = catalog.roles[entry.role]
+    const modelConfig = { ...spec.modelConfig }
+    const projection = spec.projectionRole ? entryFor(manifest, spec.projectionRole, entry.tier) : null
+    if (projection) modelConfig.projectionModelSrc = srcOf(projection)
+
+    return {
+      modelSrc: srcOf(entry),
+      ...(entry.source === 'registry' ? {} : { modelType: entry.modelType }),
+      ...(Object.keys(modelConfig).length ? { modelConfig } : {}),
+    }
+  }
+
   const load = (entry) =>
-    registry.run({ kind: 'load', role: entry.role, tier: entry.tier }, () =>
-      sdk.loadModel(entry.source === 'registry'
-        ? { modelSrc: sdk[entry.constant] }
-        : { modelSrc: entry.path, modelType: entry.modelType }))
+    registry.run({ kind: 'load', role: entry.role, tier: entry.tier }, () => sdk.loadModel(optionsFor(entry)))
 
   // Degradation instead of failure: if the tier's model will not load, drop to
   // the next smaller one that is actually on disk before giving up.
@@ -53,6 +66,8 @@ export const createRuntime = ({ log = logger } = {}) => {
   }
 
   const acquire = (role) => serial(async () => {
+    clearTimeout(idleTimers.get(role))
+    idleTimers.delete(role)
     const held = loaded.get(role)
     if (held) {
       held.refs += 1
@@ -64,15 +79,32 @@ export const createRuntime = ({ log = logger } = {}) => {
     return modelId
   })
 
-  const release = (role) => serial(async () => {
+  const unload = (role) => serial(async () => {
+    const held = loaded.get(role)
+    if (!held) return
+    await sdk.unloadModel({ modelId: held.modelId }).catch((error) => log.warn({ role, err: error.message }, 'unload failed'))
+    loaded.delete(role)
+    log.info({ role }, 'model unloaded')
+  })
+
+  // Speech and vision give their memory back after a quiet spell; chat and
+  // embeddings are resident because every request needs them.
+  const release = (role) => {
     const held = loaded.get(role)
     if (!held || catalog.roles[role]?.resident) return
     held.refs -= 1
     if (held.refs > 0) return
-    await sdk.unloadModel({ modelId: held.modelId })
-    loaded.delete(role)
-    log.info({ role }, 'model unloaded')
-  })
+    idleTimers.set(role, setTimeout(() => unload(role), config.idleUnloadMs).unref())
+  }
+
+  const hold = async (role, use) => {
+    const modelId = await acquire(role)
+    try {
+      return await use(modelId)
+    } finally {
+      release(role)
+    }
+  }
 
   const start = async () => {
     const resources = await sdk.getSystemResources({ sample: true })
@@ -97,6 +129,8 @@ export const createRuntime = ({ log = logger } = {}) => {
     if (stopped) return
     stopped = true
     state.ready = false
+    for (const timer of idleTimers.values()) clearTimeout(timer)
+    idleTimers.clear()
     const cancelled = await registry.stopAll()
     for (const [role, held] of loaded) {
       await sdk.unloadModel({ modelId: held.modelId }).catch((error) => log.warn({ role, err: error.message }, 'unload failed'))
@@ -113,16 +147,50 @@ export const createRuntime = ({ log = logger } = {}) => {
     return { run, requestId: run.requestId, settle: () => registry.drop(run.requestId) }
   }
 
-  const embed = async (text) => {
-    const modelId = await acquire('embed')
-    return registry.run({ kind: 'embeddings', role: 'embed' }, () => sdk.embed({ modelId, text }))
+  const embed = (text) =>
+    hold('embed', (modelId) => registry.run({ kind: 'embeddings', role: 'embed' }, () => sdk.embed({ modelId, text })))
+
+  // 4.1.1 — one shot. `audio` is a file path the SDK decodes, or raw samples.
+  // The model is loaded with language detection on, so one instance covers
+  // every language a field engineer speaks.
+  const transcribe = (audio, params = {}) =>
+    hold('asr', (modelId) => registry.run({ kind: 'transcription', role: 'asr' }, () =>
+      sdk.transcribe({ modelId, audioChunk: audio, ...params })))
+
+  // 4.1.2 — bidirectional. The caller writes audio, iterates text, then closes.
+  const transcribeStream = async (params = {}) => {
+    const modelId = await acquire('asr')
+    const session = await sdk.transcribeStream({ modelId, ...params })
+    return { session, close: () => release('asr') }
   }
+
+  const speak = (text, params = {}) =>
+    hold('tts', (modelId) => registry.run({ kind: 'tts', role: 'tts' },
+      () => sdk.textToSpeech({ modelId, text, inputType: 'text', stream: false, ...params }),
+      (run) => run.buffer))
+
+  // 4.3 — image and question in one context, on a VLM kept off the critical path.
+  const look = ({ prompt, imagePath, ...params }) =>
+    hold('vision', async (modelId) => {
+      const run = sdk.completion({
+        modelId,
+        history: [{ role: 'user', content: prompt, attachments: [{ path: imagePath }] }],
+        ...params,
+      })
+      registry.add(run.requestId, { kind: 'inference', role: 'vision' })
+      try {
+        return (await run.final).contentText
+      } finally {
+        registry.drop(run.requestId)
+      }
+    })
 
   const snapshot = () => ({
     ...state,
     models: [...loaded].map(([role, held]) => ({ role, modelId: held.modelId, tier: held.entry.tier, source: held.entry.source, constant: held.entry.constant })),
+    onDemand: Object.keys(catalog.roles).filter((role) => !catalog.roles[role].required && entryFor(manifest, role, state.tier)),
     inflight: registry.list().map(({ abort, ...rest }) => rest),
   })
 
-  return { start, stop, acquire, release, completion, embed, snapshot, cancel: registry.stop }
+  return { start, stop, acquire, release, completion, embed, transcribe, transcribeStream, speak, look, snapshot, cancel: registry.stop }
 }
