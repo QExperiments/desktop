@@ -1,0 +1,7 @@
+---
+description: Prefer JavaScript arrow functions over function declarations
+globs: "**/*.js"
+alwaysApply: true
+---
+
+Follow the JavaScript section in `AGENTS.md`. Do not restate it here.
