@@ -3,6 +3,7 @@ const GiB = 1024 ** 3
 export const config = {
   host: process.env.HOST ?? '127.0.0.1',
   port: Number(process.env.PORT ?? 11434),
+  chatModel: 'meridian-assistant',
   providerPublicKey: process.env.QVAC_PROVIDER_PUBLIC_KEY?.trim() || '',
   forceLocal: process.env.QVAC_FORCE_LOCAL === '1',
   assumeStrongPeer: process.env.QVAC_ASSUME_STRONG_PEER === '1',

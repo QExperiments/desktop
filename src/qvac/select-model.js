@@ -3,7 +3,7 @@ import {
   QWEN3_4B_INST_Q4_K_M,
   QWEN3_600M_INST_Q4,
 } from '@qvac/sdk'
-import { GiB } from './config.js'
+import { GiB } from '../config.js'
 
 function metricValue(metric) {
   return metric?.status === 'supported' ? metric.value : undefined

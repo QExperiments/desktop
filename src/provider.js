@@ -1,6 +1,7 @@
 import { close, startQVACProvider, stopQVACProvider } from '@qvac/sdk'
 
 const seed = process.argv[2] || process.env.QVAC_HYPERSWARM_SEED
+
 if (seed) {
   process.env.QVAC_HYPERSWARM_SEED = seed
 }
@@ -18,6 +19,7 @@ try {
   console.log('')
   console.log('On the consumer laptop:')
   console.log(`  QVAC_PROVIDER_PUBLIC_KEY=${response.publicKey} npm start`)
+
   if (seed) {
     console.log('')
     console.log('Reuse this identity next time:')
@@ -26,16 +28,19 @@ try {
     console.log('')
     console.log('Set QVAC_HYPERSWARM_SEED (64 hex chars) if you need a stable public key across restarts.')
   }
+
   console.log('')
   console.log('Ctrl+C to stop')
 
   const shutdown = async () => {
     console.log('\nstopping provider')
+
     try {
       await stopQVACProvider()
     } catch (error) {
       console.error(error)
     }
+
     await close()
     process.exit(0)
   }

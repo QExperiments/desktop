@@ -5,21 +5,12 @@ import {
   loadModel,
   unloadModel,
 } from '@qvac/sdk'
-import { config } from './config.js'
+import { config } from '../config.js'
+import { logInfo, logWarn } from '../logger.js'
 import { waitForPeer } from './peer.js'
 import { describeResources, selectModel } from './select-model.js'
 
 let sessionPromise
-
-function logInfo(log, obj, msg) {
-  if (typeof log?.info === 'function') log.info(obj, msg)
-  else console.log(msg, obj)
-}
-
-function logWarn(log, obj, msg) {
-  if (typeof log?.warn === 'function') log.warn(obj, msg)
-  else console.warn(msg, obj)
-}
 
 function progressLogger(log) {
   return (p) => {
@@ -74,11 +65,9 @@ async function startSession(log = console) {
           fallbackToLocal: sameAsLocal,
         },
       })
-
       mode = 'delegated'
     } catch (error) {
       logWarn(log, { err: error }, 'delegated loadModel failed; loading local model')
-
       modelId = await loadOnce({ modelSrc: localPick.modelSrc, log })
       mode = 'local-fallback'
     }
@@ -88,7 +77,6 @@ async function startSession(log = console) {
   }
 
   let info
-
   try {
     info = await getLoadedModelInfo({ modelId })
   } catch {
@@ -107,7 +95,6 @@ async function startSession(log = console) {
   }
 
   logInfo(log, session, 'chat model ready')
-
   return session
 }
 
