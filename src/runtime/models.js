@@ -42,3 +42,22 @@ export const entryFor = (manifest, role, tier) => manifest?.entries?.[key(role, 
 // error instead of a silent download while the network is supposed to be off.
 export const missingFrom = (manifest, targets) =>
   targets.filter((target) => !entryFor(manifest, target.role, target.tier)).map((target) => key(target.role, target.tier))
+
+const provisioned = async (manifest, tier) => {
+  const targets = targetsFor(tier)
+  if (!targets.length) return false
+  const checks = await Promise.all(targets.map(async (target) => {
+    const entry = entryFor(manifest, target.role, tier)
+    return Boolean(entry) && (await sizeOf(entry.path)) === entry.bytes
+  }))
+  return checks.every(Boolean)
+}
+
+// The tier we serve: the one this machine deserves if its weights are all
+// there, otherwise the largest one that is. Returns null when nothing is.
+export const provisionedTier = async (manifest, preferred, order = ['L', 'M', 'S']) => {
+  for (const tier of [preferred, ...order]) {
+    if (await provisioned(manifest, tier)) return tier
+  }
+  return null
+}

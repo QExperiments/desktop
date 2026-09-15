@@ -4,7 +4,7 @@ import * as sdk from '@qvac/sdk'
 import { config } from '../config.js'
 import { createCancelRegistry } from './cancel.js'
 import { selectTier } from './capability.js'
-import { catalog, entryFor, readManifest, sizeOf, targetsFor } from './models.js'
+import { catalog, entryFor, provisionedTier, readManifest, targetsFor } from './models.js'
 import { logger } from '../logger.js'
 
 const TIERS = ['L', 'M', 'S']
@@ -25,8 +25,6 @@ export const createRuntime = ({ log = logger } = {}) => {
     chain = next.then(() => {}, () => {})
     return next
   }
-
-  const usable = async (entry) => Boolean(entry) && (await sizeOf(entry.path)) === entry.bytes
 
   const load = (entry) =>
     registry.run({ kind: 'load', role: entry.role, tier: entry.tier }, () =>
@@ -84,18 +82,7 @@ export const createRuntime = ({ log = logger } = {}) => {
 
     // Prefer the tier this machine deserves, but accept whatever was actually
     // provisioned: a fleet laptop may be handed a bundle built elsewhere.
-    const complete = async (tier) => {
-      const targets = targetsFor(tier)
-      const checks = await Promise.all(targets.map((target) => usable(entryFor(manifest, target.role, tier))))
-      return checks.length > 0 && checks.every(Boolean)
-    }
-    let tier = null
-    for (const candidate of [chosen.tier, ...TIERS]) {
-      if (await complete(candidate)) {
-        tier = candidate
-        break
-      }
-    }
+    const tier = await provisionedTier(manifest, chosen.tier, TIERS)
     if (!tier) throw new Error(`weights for tier ${chosen.tier} are missing or truncated — ${FETCH_HINT}`)
 
     state = { ...state, tier, hardware: chosen.hardware, reason: chosen.reason }
