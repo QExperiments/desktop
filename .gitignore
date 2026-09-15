@@ -10,3 +10,4 @@ CLAUDE.local.md
 AGENTS.override.md
 .env
 .env.*
+.meridian-serve.pid
