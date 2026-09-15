@@ -1,5 +1,7 @@
+import multipart from '@fastify/multipart'
 import Fastify from 'fastify'
 import { config } from '../config.js'
+import { registerMedia } from './media.js'
 
 const openaiError = (reply, code, message, type) =>
   reply.code(code).send({ error: { message, type, code } })
@@ -7,6 +9,9 @@ const openaiError = (reply, code, message, type) =>
 export const createServer = (runtime) => {
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } })
   const api = config.apiPrefix
+
+  app.register(multipart, { limits: { fileSize: 32 * 1024 * 1024 } })
+  app.register(async (scope) => registerMedia(scope, runtime))
 
   // Readiness gate. The harness polls this until it returns 200, so it must
   // stay 503 until the weights are loaded and the runtime can answer.

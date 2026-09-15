@@ -28,6 +28,7 @@
   "homepage": "https://github.com/QExperiments/desktop#readme",
   "license": "ISC",
   "dependencies": {
+    "@fastify/multipart": "^10.1.1",
     "@qvac/sdk": "^0.18.2",
     "fastify": "^5.12.4"
   }
