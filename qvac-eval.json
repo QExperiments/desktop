@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "setup": "npm ci && npm run models:fetch && npm run corpus:ingest",
+  "start": "npm run serve",
+  "shutdown": "npm run serve:stop",
+  "baseUrl": "http://127.0.0.1:11434/v1",
+  "readyPath": "/models",
+  "readyTimeoutSec": 600,
+  "models": { "chat": "meridian-assistant", "embedding": "meridian-embed" }
+}

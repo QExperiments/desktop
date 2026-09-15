@@ -1,16 +1,10 @@
-const fastify = require('fastify')({ logger: true })
+import { config } from './src/config.js'
+import Fastify from 'fastify'
 
-fastify.get('/', async () => {
-  return { hello: 'world' }
-})
+const app = Fastify({ logger: true })
 
-const start = async () => {
-  try {
-    await fastify.listen({ port: 3000, host: '127.0.0.1' })
-  } catch (err) {
-    fastify.log.error(err)
-    process.exit(1)
-  }
-}
+// Readiness gate: the eval harness polls this path until it returns 200.
+// The model runtime commit replaces the stub with the real state.
+app.get(`${config.apiPrefix}/models`, (_req, reply) => reply.code(503).send({ error: { message: 'runtime not wired yet' } }))
 
-start()
+await app.listen({ host: config.host, port: config.port })

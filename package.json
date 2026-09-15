@@ -1,25 +1,27 @@
 {
   "name": "desktop",
   "version": "1.0.0",
-  "description": "",
+  "description": "Meridian on-device assistant (QVAC)",
   "main": "index.js",
+  "type": "module",
+  "engines": { "node": ">=22.17" },
   "scripts": {
-    "start": "node index.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "serve": "node index.js",
+    "serve:stop": "node src/serve-stop.js",
+    "models:fetch": "node scripts/models-fetch.js",
+    "corpus:ingest": "node scripts/corpus-ingest.js",
+    "test": "node --test test/unit",
+    "test:e2e": "node --test test/e2e",
+    "eval": "node scripts/stub.js eval",
+    "build": "node scripts/stub.js build",
+    "build:full": "node scripts/stub.js build:full"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/QExperiments/desktop.git"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
-  "bugs": {
-    "url": "https://github.com/QExperiments/desktop/issues"
-  },
+  "repository": { "type": "git", "url": "git+https://github.com/QExperiments/desktop.git" },
+  "bugs": { "url": "https://github.com/QExperiments/desktop/issues" },
   "homepage": "https://github.com/QExperiments/desktop#readme",
+  "license": "ISC",
   "dependencies": {
+    "@qvac/sdk": "0.18.2",
     "fastify": "^5.12.4"
   }
 }

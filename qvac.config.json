@@ -1,0 +1,8 @@
+{
+  "plugins": [
+    "@qvac/sdk/llamacpp-completion/plugin",
+    "@qvac/sdk/llamacpp-embedding/plugin"
+  ],
+  "loggerConsoleOutput": true,
+  "loggerLevel": "info"
+}
