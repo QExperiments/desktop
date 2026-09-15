@@ -6,7 +6,7 @@ import {
   unloadModel,
 } from '@qvac/sdk'
 import { config } from '../config.js'
-import { logInfo, logWarn } from '../logger.js'
+import { logInfo, logWarn, logger } from '../logger.js'
 import { waitForPeer } from './peer.js'
 import { describeResources, selectModel } from './select-model.js'
 
@@ -26,7 +26,7 @@ const loadOnce = ({ modelSrc, delegate, log }) =>
     onProgress: progressLogger(log),
   })
 
-const startSession = async (log = console) => {
+const startSession = async (log = logger) => {
   const resources = await getSystemResources({ sample: true })
   const hardware = describeResources(resources)
   const localPick = selectModel(resources)

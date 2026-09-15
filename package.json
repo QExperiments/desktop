@@ -1,13 +1,13 @@
 {
   "name": "desktop",
   "version": "1.0.0",
-  "description": "Meridian local-first assistant (QVAC 0.18 P2P consumer + provider)",
+  "description": "Meridian local-first assistant (QVAC 0.18 P2P inference consumer + provider)",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
     "serve": "node index.js",
     "serve:stop": "node src/serve-stop.js",
-    "provide": "node src/provider.js",
+    "provide": "node src/p2p-inference-provider.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
