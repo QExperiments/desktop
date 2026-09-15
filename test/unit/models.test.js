@@ -22,10 +22,16 @@ describe('targetsFor', () => {
     }
   })
 
-  it('pairs every vision model with a projection for the same tier', () => {
-    const { projectionRole, models } = catalog.roles.vision
-    assert.equal(projectionRole, 'visionProjection')
-    for (const tier of Object.keys(models)) assert.ok(catalog.roles[projectionRole].models[tier], `no projection for ${tier}`)
+  it('provides every companion model on the same tier as the role that needs it', () => {
+    for (const [name, role] of Object.entries(catalog.roles)) {
+      for (const companion of Object.values(role.companions ?? {})) {
+        for (const tier of Object.keys(role.models)) {
+          assert.ok(catalog.roles[companion]?.models[tier], `${name} on ${tier} has no ${companion}`)
+        }
+      }
+    }
+    assert.equal(catalog.roles.vision.companions.projectionModelSrc, 'visionProjection')
+    assert.equal(catalog.roles.asr.companions.vadModelSrc, 'vad')
   })
 })
 

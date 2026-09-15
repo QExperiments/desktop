@@ -105,6 +105,9 @@
         "audio_format": "f32le",
         "strategy": "greedy",
         "language": "auto"
+      },
+      "companions": {
+        "vadModelSrc": "vad"
       }
     },
     "tts": {
@@ -167,7 +170,9 @@
           "https": "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/e87f176479d0855a907a41277aca2f8ee7a09523/Qwen3.5-4B-Q4_K_M.gguf"
         }
       },
-      "projectionRole": "visionProjection"
+      "companions": {
+        "projectionModelSrc": "visionProjection"
+      }
     },
     "visionProjection": {
       "addon": "llm",
@@ -195,6 +200,36 @@
           "bytes": 366894656,
           "sha256": "40a4f07d7bbdbb43011d6cf35ef751e4b1829ff47ee8aa4964c6296f571725ad",
           "https": "https://huggingface.co/mradermacher/Qwen3.5-4B-GGUF/resolve/1a5df2c0cba51dae8ac5888420360d8703707171/Qwen3.5-4B.mmproj-Q8_0.gguf"
+        }
+      }
+    },
+    "vad": {
+      "addon": "whisper",
+      "modelType": "whispercpp-transcription",
+      "required": false,
+      "resident": false,
+      "note": "voice activity detection; whisper needs it to segment a live stream (4.1.2)",
+      "models": {
+        "S": {
+          "constant": "VAD_SILERO_5_1_2",
+          "file": "ggml-silero-v5.1.2.bin",
+          "bytes": 885098,
+          "sha256": "29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf",
+          "https": "https://huggingface.co/ggml-org/whisper-vad/resolve/9ffd54a1e1ee413ddf265af9913beaf518d1639b/ggml-silero-v5.1.2.bin"
+        },
+        "M": {
+          "constant": "VAD_SILERO_5_1_2",
+          "file": "ggml-silero-v5.1.2.bin",
+          "bytes": 885098,
+          "sha256": "29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf",
+          "https": "https://huggingface.co/ggml-org/whisper-vad/resolve/9ffd54a1e1ee413ddf265af9913beaf518d1639b/ggml-silero-v5.1.2.bin"
+        },
+        "L": {
+          "constant": "VAD_SILERO_5_1_2",
+          "file": "ggml-silero-v5.1.2.bin",
+          "bytes": 885098,
+          "sha256": "29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf",
+          "https": "https://huggingface.co/ggml-org/whisper-vad/resolve/9ffd54a1e1ee413ddf265af9913beaf518d1639b/ggml-silero-v5.1.2.bin"
         }
       }
     }

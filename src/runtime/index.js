@@ -29,11 +29,15 @@ export const createRuntime = ({ log = logger } = {}) => {
 
   const srcOf = (entry) => (entry.source === 'registry' ? sdk[entry.constant] : entry.path)
 
+  // A role may need a second file loaded with it: the projection that makes a
+  // VLM see, the VAD model whisper needs to segment a live stream.
   const optionsFor = (entry) => {
     const spec = catalog.roles[entry.role]
     const modelConfig = { ...spec.modelConfig }
-    const projection = spec.projectionRole ? entryFor(manifest, spec.projectionRole, entry.tier) : null
-    if (projection) modelConfig.projectionModelSrc = srcOf(projection)
+    for (const [key, role] of Object.entries(spec.companions ?? {})) {
+      const companion = entryFor(manifest, role, entry.tier)
+      if (companion) modelConfig[key] = srcOf(companion)
+    }
 
     return {
       modelSrc: srcOf(entry),
