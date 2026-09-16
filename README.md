@@ -102,9 +102,10 @@ npm run serve:stop
 ```
 
 `npm run serve` binds the host and port from `qvac-eval.json`. Set `PORT`
-to run beside something already on 11434. `GET /v1/models` answers 503
-while weights load and 200 once the runtime can serve, which is the
-readiness signal the eval harness polls.
+to run beside something already on 11434. `GET /` is an EJS test console
+for chat, speech, transcription, the hands-free loop and images.
+`GET /v1/models` answers 503 while weights load and 200 once the runtime
+can serve, which is the readiness signal the eval harness polls.
 
 ## Models
 
@@ -159,6 +160,7 @@ npm run test:e2e  # needs MERIDIAN_E2E=1 and a completed models:fetch
 | `src/runtime/` | the only consumer code that imports `@qvac/sdk` |
 | `src/p2p/provider.js` | `npm run provide` on the strong box; no HTTP |
 | `src/http/` | OpenAI-compatible surface; talks to the runtime, never the SDK |
+| `views/` | EJS test console at `GET /` |
 | `src/chat/answer.js` | the one seam a question passes through to become an answer |
 | `src/audio/wav.js` | PCM in and out of the RIFF container every client expects |
 | `scripts/models-fetch.js` | provisioning, the one step that uses the network |

@@ -4,6 +4,7 @@ import Fastify from 'fastify'
 import { answer } from '../chat/answer.js'
 import { config } from '../config.js'
 import { registerMedia } from './media.js'
+import { registerUi } from './ui.js'
 
 const openaiError = (reply, code, message, type) =>
   reply.code(code).send({ error: { message, type, code } })
@@ -13,13 +14,13 @@ export const createServer = (runtime) => {
   const api = config.apiPrefix
 
   app.register(multipart, { limits: { fileSize: 32 * 1024 * 1024 } })
+  app.register(async (scope) => registerUi(scope, runtime))
   app.register(async (scope) => registerMedia(scope, runtime))
 
-  // Readiness gate. The harness polls this until it returns 200, so it must
-  // stay 503 until the weights are loaded and the runtime can answer.
   app.get(`${api}/models`, (_request, reply) => {
     const state = runtime.snapshot()
     if (!state.ready) return openaiError(reply, 503, 'models are still loading', 'service_unavailable')
+
     return {
       object: 'list',
       data: [config.chatModel, config.embeddingModel].map((id) => ({ id, object: 'model', owned_by: 'meridian' })),
@@ -28,19 +29,12 @@ export const createServer = (runtime) => {
 
   app.get('/health', () => runtime.snapshot())
 
-  // Cancellation surface for req 1.4: the UI stop button and the download
-  // progress bar both post here with the requestId they were handed.
   app.post(`${api}/cancel/:requestId`, async (request, reply) => {
     const entry = await runtime.cancel(request.params.requestId)
     if (!entry) return openaiError(reply, 404, `no in-flight request ${request.params.requestId}`, 'not_found')
     return { cancelled: true, requestId: entry.requestId, kind: entry.kind, role: entry.role }
   })
 
-  // Deliberately not a model pass-through: 6.1.1 requires retrieval, grounding
-  // and tools behind this route, and those land with the RAG stage. Until then
-  // the route refuses, unless MERIDIAN_UNGROUNDED=1 asks for the ungrounded
-  // answer for local testing. That answer does not satisfy 6.1.1 and the flag
-  // is never set by `serve`, the eval harness or CI.
   app.post(`${api}/chat/completions`, async (request, reply) => {
     if (process.env.MERIDIAN_UNGROUNDED !== '1') {
       return openaiError(reply, 501, 'chat completions arrive with the retrieval stage; this build only manages models', 'not_implemented')
@@ -56,6 +50,7 @@ export const createServer = (runtime) => {
     }
 
     const generationParams = {}
+
     if (typeof request.body?.temperature === 'number') generationParams.temp = request.body.temperature
     if (Number.isInteger(request.body?.seed)) generationParams.seed = request.body.seed
 
