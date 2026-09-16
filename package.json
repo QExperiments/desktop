@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "models:fetch": "node scripts/models-fetch.mjs"
   },
   "repository": {
     "type": "git",
@@ -20,6 +20,8 @@
   },
   "homepage": "https://github.com/QExperiments/desktop#readme",
   "dependencies": {
+    "@lancedb/lancedb": "^0.38.0",
+    "@qvac/sdk": "0.18.2",
     "fastify": "^5.12.4"
   }
 }
