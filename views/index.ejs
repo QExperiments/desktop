@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Test Console</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f4f1ea;
+        --ink: #1c1916;
+        --muted: #5c564e;
+        --card: #fffdf8;
+        --line: #ddd6c8;
+        --accent: #8c2f1b;
+        --ok: #1f6b3a;
+        --bad: #9b1c1c;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0 auto;
+        max-width: 52rem;
+        padding: 1.5rem 1rem 4rem;
+        font: 16px/1.45 ui-sans-serif, system-ui, sans-serif;
+        color: var(--ink);
+        background: var(--bg);
+      }
+      h1 { font-size: 1.6rem; margin: 0 0 0.25rem; }
+      h2 { font-size: 1.05rem; margin: 0 0 0.75rem; }
+      p, label { color: var(--muted); }
+      header p { margin: 0 0 1.25rem; }
+      .row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+      .pills { display: flex; flex-wrap: wrap; gap: 0.45rem; margin: 0 0 0.85rem; }
+      .pill {
+        display: inline-flex;
+        align-items: baseline;
+        gap: 0.35rem;
+        font-size: 0.8rem;
+        padding: 0.28rem 0.7rem;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: #fff;
+      }
+      .pill .k { color: var(--muted); font-weight: 500; }
+      .pill .v { color: var(--ink); font-weight: 650; }
+      .pill.ok { border-color: #b7dcc0; background: #eef8f0; }
+      .pill.ok .v { color: var(--ok); }
+      .pill.bad { border-color: #e8b4b0; background: #fdf0ee; }
+      .pill.bad .v { color: var(--bad); }
+      section {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 1rem 1.1rem 1.15rem;
+        margin-bottom: 0.9rem;
+      }
+      textarea, input[type="text"] {
+        width: 100%;
+        margin: 0.35rem 0 0.7rem;
+        padding: 0.55rem 0.65rem;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        font: inherit;
+        background: #fff;
+      }
+      textarea { min-height: 4.5rem; resize: vertical; }
+      .pick {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 0.7rem;
+        margin: 0.35rem 0 0.7rem;
+        cursor: pointer;
+      }
+      .pick input {
+        position: absolute;
+        inset: 0;
+        opacity: 0;
+        cursor: pointer;
+      }
+      .pick-btn {
+        flex: 0 0 auto;
+        border-radius: 8px;
+        padding: 0.45rem 0.8rem;
+        background: #ece6db;
+        color: var(--ink);
+      }
+      .pick:hover .pick-btn { background: #e4ddd0; }
+      .pick:focus-within .pick-btn {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+      .pick-name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 0.9rem;
+        color: var(--ink);
+      }
+      .pick-name.empty { color: var(--muted); }
+      button {
+        font: inherit;
+        border: 0;
+        border-radius: 8px;
+        padding: 0.45rem 0.8rem;
+        background: var(--accent);
+        color: #fff;
+        cursor: pointer;
+      }
+      button.ghost { background: #ece6db; color: var(--ink); }
+      button:disabled { opacity: 0.55; cursor: wait; }
+      .out {
+        white-space: pre-wrap;
+        word-break: break-word;
+        background: #f7f3ea;
+        border-radius: 8px;
+        padding: 0.7rem 0.8rem;
+        font-size: 0.9rem;
+        min-height: 2.4rem;
+        margin: 0.85rem 0 0;
+      }
+      audio { width: 100%; margin-top: 0.5rem; }
+      .hint { font-size: 0.85rem; margin: 0 0 0.6rem; }
+    </style>
+  </head>
+  <body data-api="<%= apiPrefix %>" data-ungrounded="<%= ungrounded ? '1' : '' %>">
+    <header>
+      <h1>Test Console</h1>
+      <p>Chat needs <code>MERIDIAN_UNGROUNDED=1</code> on serve. ASR/TTS load on first use.</p>
+    </header>
+
+    <section>
+      <h2>Runtime</h2>
+      <p class="hint">
+        Local means this process is not delegated — the model runs locally.
+        To send chat, ASR and TTS to a peer, run <code>npm run provide</code> on the other machine,
+        then start this serve with <code>QVAC_PROVIDER_PUBLIC_KEY</code> set to the key it prints
+        and without <code>QVAC_FORCE_LOCAL=1</code>. Embeddings and vision stay on this machine.
+      </p>
+      <div class="pills" id="pills"></div>
+      <div class="row">
+        <button type="button" class="ghost" id="refresh">Refresh /health</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Chat</h2>
+      <p class="hint" id="chat-hint"></p>
+      <label for="chat-q">Question</label>
+      <textarea id="chat-q">In one sentence, what is a torque wrench?</textarea>
+      <button type="button" id="chat-go">Send</button>
+      <div class="out" id="chat-out"></div>
+    </section>
+
+    <section>
+      <h2>Speak</h2>
+      <label for="tts-q">Text to speak</label>
+      <textarea id="tts-q">Lead time is six weeks.</textarea>
+      <div class="row">
+        <button type="button" id="tts-go">Generate wav</button>
+        <button type="button" class="ghost" id="tts-dl" disabled>Download wav</button>
+      </div>
+      <div class="out" id="tts-out"></div>
+      <audio id="tts-audio" controls></audio>
+    </section>
+
+    <section>
+      <h2>Transcribe</h2>
+      <p class="hint">Upload a wav (the speak output works) or record a few seconds from the mic.</p>
+      <label class="pick">
+        <input id="asr-file" type="file" accept="audio/*,.wav" />
+        <span class="pick-btn">Choose wav</span>
+        <span class="pick-name empty">No file chosen</span>
+      </label>
+      <div class="row">
+        <button type="button" id="asr-go">Transcribe file</button>
+        <button type="button" class="ghost" id="asr-rec">Record 4s and transcribe</button>
+      </div>
+      <div class="out" id="asr-out"></div>
+    </section>
+
+    <section>
+      <h2>Hands-free ask</h2>
+      <p class="hint">Speech in, ungrounded chat, speech back. Needs ASR + TTS + chat.</p>
+      <label class="pick">
+        <input id="ask-file" type="file" accept="audio/*,.wav" />
+        <span class="pick-btn">Choose wav</span>
+        <span class="pick-name empty">No file chosen</span>
+      </label>
+      <div class="row">
+        <button type="button" id="ask-go">Ask from file</button>
+        <button type="button" class="ghost" id="ask-rec">Record 4s and ask</button>
+      </div>
+      <div class="out" id="ask-out"></div>
+      <audio id="ask-audio" controls></audio>
+    </section>
+
+    <section>
+      <h2>Image</h2>
+      <p class="hint">Needs vision weights (<code>models:fetch -- --all</code>). Photos stay on this machine.</p>
+      <label for="img-q">Question</label>
+      <input id="img-q" type="text" value="What is the part number?" />
+      <label class="pick">
+        <input id="img-file" type="file" accept="image/*" />
+        <span class="pick-btn">Choose photo</span>
+        <span class="pick-name empty">No file chosen</span>
+      </label>
+      <button type="button" id="img-go">Ask about photo</button>
+      <div class="out" id="img-out"></div>
+    </section>
+
+    <script type="application/json" id="boot"><%- JSON.stringify(snapshot).replace(/</g, '\\u003c') %></script>
+    <script>
+      const body = document.body
+      const api = body.dataset.api || '/v1'
+      const ungrounded = body.dataset.ungrounded === '1'
+      const $ = (id) => document.getElementById(id)
+
+      const show = (id, value) => {
+        $(id).textContent = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
+      }
+
+      const fail = async (response) => {
+        const text = await response.text()
+        try {
+          const json = JSON.parse(text)
+          throw new Error(json.message || json.error?.message || text)
+        } catch (error) {
+          if (error instanceof SyntaxError) throw new Error(text || `${response.status}`)
+          throw error
+        }
+      }
+
+      const paint = (snapshot) => {
+        const pills = $('pills')
+        pills.replaceChildren()
+        const add = (key, value, ok) => {
+          const el = document.createElement('span')
+          el.className = `pill ${ok === true ? 'ok' : ok === false ? 'bad' : ''}`
+          const label = document.createElement('span')
+          label.className = 'k'
+          const title = /^(asr|tts)$/i.test(key)
+            ? key.toUpperCase()
+            : `${key.charAt(0).toUpperCase()}${key.slice(1)}`
+          label.textContent = `${title}:`
+          const val = document.createElement('span')
+          val.className = 'v'
+          val.textContent = String(value)
+          el.append(label, val)
+          pills.append(el)
+        }
+        add('ready', snapshot.ready === true, snapshot.ready)
+        add('mode', snapshot.mode ?? '—')
+        add('tier', snapshot.tier ?? '—')
+        add('delegated', snapshot.isDelegated === true, snapshot.isDelegated)
+        for (const model of snapshot.models ?? []) {
+          add(model.role, model.delegated ? 'peer' : 'local', model.delegated)
+        }
+      }
+
+      $('chat-hint').textContent = ungrounded
+        ? 'Chat is enabled for this process.'
+        : 'Chat will 501 until serve is started with MERIDIAN_UNGROUNDED=1.'
+
+      paint(JSON.parse($('boot').textContent))
+
+      const bindFile = (id, empty) => {
+        const input = $(id)
+        const name = input.closest('.pick').querySelector('.pick-name')
+        const paintName = () => {
+          const file = input.files[0]
+          name.textContent = file?.name || empty
+          name.classList.toggle('empty', !file)
+        }
+        input.addEventListener('change', paintName)
+        paintName()
+      }
+      bindFile('asr-file', 'No file chosen')
+      bindFile('ask-file', 'No file chosen')
+      bindFile('img-file', 'No file chosen')
+
+      $('refresh').addEventListener('click', async () => {
+        const response = await fetch('/health')
+        if (!response.ok) return fail(response)
+        paint(await response.json())
+      })
+
+      $('chat-go').addEventListener('click', async () => {
+        $('chat-go').disabled = true
+        show('chat-out', '…')
+        try {
+          const response = await fetch(`${api}/chat/completions`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ messages: [{ role: 'user', content: $('chat-q').value }] }),
+          })
+          if (!response.ok) await fail(response)
+          const json = await response.json()
+          show('chat-out', json.choices?.[0]?.message?.content ?? json)
+        } catch (error) {
+          show('chat-out', error.message)
+        } finally {
+          $('chat-go').disabled = false
+        }
+      })
+
+      $('tts-go').addEventListener('click', async () => {
+        $('tts-go').disabled = true
+        show('tts-out', '…')
+        try {
+          const response = await fetch(`${api}/audio/speech`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ input: $('tts-q').value, language: 'en' }),
+          })
+          if (!response.ok) await fail(response)
+          const blob = await response.blob()
+          const audio = $('tts-audio')
+          if (audio.src.startsWith('blob:')) URL.revokeObjectURL(audio.src)
+          audio.src = URL.createObjectURL(blob)
+          $('tts-dl').disabled = false
+          show('tts-out', `wav ${blob.size} bytes`)
+          audio.play().catch(() => {})
+        } catch (error) {
+          show('tts-out', error.message)
+        } finally {
+          $('tts-go').disabled = false
+        }
+      })
+
+      $('tts-dl').addEventListener('click', () => {
+        const href = $('tts-audio').src
+        if (!href.startsWith('blob:')) return
+        const link = document.createElement('a')
+        link.href = href
+        link.download = 'speech.wav'
+        document.body.append(link)
+        link.click()
+        link.remove()
+      })
+
+      const encodeWav = (float32, sampleRate) => {
+        const pcm = new Int16Array(float32.length)
+        for (let i = 0; i < float32.length; i += 1) {
+          const sample = Math.max(-1, Math.min(1, float32[i]))
+          pcm[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff
+        }
+        const buffer = new ArrayBuffer(44 + pcm.byteLength)
+        const view = new DataView(buffer)
+        const ascii = (offset, text) => {
+          for (let i = 0; i < text.length; i += 1) view.setUint8(offset + i, text.charCodeAt(i))
+        }
+        ascii(0, 'RIFF')
+        view.setUint32(4, 36 + pcm.byteLength, true)
+        ascii(8, 'WAVE')
+        ascii(12, 'fmt ')
+        view.setUint32(16, 16, true)
+        view.setUint16(20, 1, true)
+        view.setUint16(22, 1, true)
+        view.setUint32(24, sampleRate, true)
+        view.setUint32(28, sampleRate * 2, true)
+        view.setUint16(32, 2, true)
+        view.setUint16(34, 16, true)
+        ascii(36, 'data')
+        view.setUint32(40, pcm.byteLength, true)
+        new Uint8Array(buffer, 44).set(new Uint8Array(pcm.buffer))
+        return new Blob([buffer], { type: 'audio/wav' })
+      }
+
+      const recordWav = async (ms = 4000) => {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        const ctx = new AudioContext()
+        const source = ctx.createMediaStreamSource(stream)
+        const processor = ctx.createScriptProcessor(4096, 1, 1)
+        const mute = ctx.createGain()
+        mute.gain.value = 0
+        const chunks = []
+        processor.onaudioprocess = (event) => {
+          chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)))
+        }
+        source.connect(processor)
+        processor.connect(mute)
+        mute.connect(ctx.destination)
+        await new Promise((resolve) => setTimeout(resolve, ms))
+        processor.disconnect()
+        source.disconnect()
+        for (const track of stream.getTracks()) track.stop()
+        const length = chunks.reduce((sum, chunk) => sum + chunk.length, 0)
+        const samples = new Float32Array(length)
+        let offset = 0
+        for (const chunk of chunks) {
+          samples.set(chunk, offset)
+          offset += chunk.length
+        }
+        const blob = encodeWav(samples, ctx.sampleRate)
+        await ctx.close()
+        return blob
+      }
+
+      const postFile = async (url, blob, name, extra = {}) => {
+        const data = new FormData()
+        data.append('file', blob, name)
+        for (const [key, value] of Object.entries(extra)) data.append(key, value)
+        const response = await fetch(url, { method: 'POST', body: data })
+        if (!response.ok) await fail(response)
+        return response.json()
+      }
+
+      $('asr-go').addEventListener('click', async () => {
+        const file = $('asr-file').files[0]
+        if (!file) return show('asr-out', 'choose a file first')
+        $('asr-go').disabled = true
+        show('asr-out', '…')
+        try {
+          const json = await postFile(`${api}/audio/transcriptions`, file, file.name)
+          show('asr-out', json.text ?? json)
+        } catch (error) {
+          show('asr-out', error.message)
+        } finally {
+          $('asr-go').disabled = false
+        }
+      })
+
+      $('asr-rec').addEventListener('click', async () => {
+        $('asr-rec').disabled = true
+        show('asr-out', 'recording…')
+        try {
+          const blob = await recordWav()
+          show('asr-out', 'transcribing…')
+          const json = await postFile(`${api}/audio/transcriptions`, blob, 'mic.wav')
+          show('asr-out', json.text ?? json)
+        } catch (error) {
+          show('asr-out', error.message)
+        } finally {
+          $('asr-rec').disabled = false
+        }
+      })
+
+      const runAsk = async (blob, name) => {
+        const json = await postFile(`${api}/audio/ask`, blob, name, { language: 'en' })
+        show('ask-out', `Q: ${json.question}\nA: ${json.answer}`)
+        if (json.audio?.base64) {
+          $('ask-audio').src = `data:audio/wav;base64,${json.audio.base64}`
+          $('ask-audio').play().catch(() => {})
+        }
+      }
+
+      $('ask-go').addEventListener('click', async () => {
+        const file = $('ask-file').files[0]
+        if (!file) return show('ask-out', 'choose a file first')
+        $('ask-go').disabled = true
+        show('ask-out', '…')
+        try {
+          await runAsk(file, file.name)
+        } catch (error) {
+          show('ask-out', error.message)
+        } finally {
+          $('ask-go').disabled = false
+        }
+      })
+
+      $('ask-rec').addEventListener('click', async () => {
+        $('ask-rec').disabled = true
+        show('ask-out', 'recording…')
+        try {
+          const blob = await recordWav()
+          show('ask-out', 'asking…')
+          await runAsk(blob, 'mic.wav')
+        } catch (error) {
+          show('ask-out', error.message)
+        } finally {
+          $('ask-rec').disabled = false
+        }
+      })
+
+      $('img-go').addEventListener('click', async () => {
+        const file = $('img-file').files[0]
+        if (!file) return show('img-out', 'choose a photo first')
+        $('img-go').disabled = true
+        show('img-out', '…')
+        try {
+          const json = await postFile(`${api}/images/ask`, file, file.name, { question: $('img-q').value })
+          show('img-out', json.answer ?? json)
+        } catch (error) {
+          show('img-out', error.message)
+        } finally {
+          $('img-go').disabled = false
+        }
+      })
+    </script>
+  </body>
+</html>

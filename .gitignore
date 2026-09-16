@@ -11,3 +11,6 @@ CLAUDE.local.md
 AGENTS.override.md
 .env
 .env.*
+context/
+data/
+docs/*.html
