@@ -1,16 +1,33 @@
-const fastify = require('fastify')({ logger: true })
+import { writeFile, mkdir, rm } from 'node:fs/promises'
+import { dirname } from 'node:path'
+import { config } from './src/config.js'
+import { createServer } from './src/http/server.js'
+import { createRuntime } from './src/runtime/index.js'
 
-fastify.get('/', async () => {
-  return { hello: 'world' }
-})
+const runtime = createRuntime()
+const app = createServer(runtime)
 
-const start = async () => {
-  try {
-    await fastify.listen({ port: 3000, host: '127.0.0.1' })
-  } catch (err) {
-    fastify.log.error(err)
-    process.exit(1)
-  }
+const shutdown = async (signal) => {
+  app.log.info({ signal }, 'shutting down')
+  await app.close().catch((error) => app.log.error(error))
+  await runtime.stop().catch((error) => app.log.error(error))
+  await rm(config.pidPath, { force: true })
+  process.exit(0)
 }
 
-start()
+for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => shutdown(signal))
+
+try {
+  // Listen before loading: the harness can then poll /v1/models and watch it
+  // turn from 503 into 200 instead of waiting on a refused connection.
+  await app.listen({ host: config.host, port: config.port })
+  await mkdir(dirname(config.pidPath), { recursive: true })
+  await writeFile(config.pidPath, `${process.pid}\n`)
+  const state = await runtime.start()
+  app.log.info({ tier: state.tier, models: state.models }, 'ready')
+} catch (error) {
+  app.log.error(error)
+  await runtime.stop().catch(() => {})
+  await rm(config.pidPath, { force: true })
+  process.exit(1)
+}
