@@ -11,12 +11,13 @@ Tether. The client, Meridian Components, is fictional.
 
 ## What works today
 
-This branch covers Req #1, the model runtime, and Req #4, voice and
-vision. It provisions weights, picks a tier for the machine, loads and
-unloads models, cancels work in flight, transcribes speech in several
-languages, speaks answers back and answers questions about a photograph.
-Retrieval, citations, tools and P2P delegation arrive in later stages;
-see [ARCHITECTURE.md](ARCHITECTURE.md) for the plan and
+This branch covers Req #1, the model runtime, Req #4, voice and vision,
+and Req #5.1, P2P delegation. It provisions weights, picks a tier
+for the machine, loads and unloads models, cancels work in flight,
+transcribes speech, speaks answers back, answers questions about a
+photograph, and can run chat, ASR and TTS on a Meridian provider peer.
+Retrieval, citations and tools arrive in later stages; see
+[ARCHITECTURE.md](ARCHITECTURE.md) for the plan and
 [docs/decisions.md](docs/decisions.md) for why things are the way they
 are.
 
@@ -56,6 +57,34 @@ array it will fill.
 
 Languages are detected rather than declared. Transcription quality
 depends on the tier: whisper-tiny on S, whisper-base on M.
+
+## P2P inference
+
+Chat, transcription and speech generation may run on a stronger Meridian
+box. Embeddings and vision stay on this laptop so the corpus and photos
+never leave. Eval never starts a provider: `npm run serve` with no
+`QVAC_PROVIDER_PUBLIC_KEY` is local-only.
+
+On the strong machine:
+
+```bash
+npm run provide
+```
+
+It prints a public key. On the field laptop, with that key in the
+environment, `npm run serve` heartbeats the peer and loads chat (and, on
+first use, ASR and TTS) with `delegate`. `GET /health` reports
+`mode: "delegated"` when chat is on the peer; each loaded model also
+has a `delegated` flag. If the peer is down, everything loads locally.
+
+`POST /v1/audio/transcriptions`, `/v1/audio/speech` and `/v1/audio/ask`
+all go through that same `acquire()`, so they pick up the peer without
+a separate P2P path. `/v1/chat/completions` is still 501 until
+retrieval; when that route lands it will use the same chat model.
+
+`QVAC_FORCE_LOCAL=1` skips the peer even when a key is set.
+`QVAC_ASSUME_STRONG_PEER=1` asks the peer for L-tier weights instead of
+this laptop's tier.
 
 ## Requirements
 
@@ -127,7 +156,8 @@ npm run test:e2e  # needs MERIDIAN_E2E=1 and a completed models:fetch
 
 | Path | What |
 | --- | --- |
-| `src/runtime/` | the only code that imports `@qvac/sdk` |
+| `src/runtime/` | the only consumer code that imports `@qvac/sdk` |
+| `src/p2p/provider.js` | `npm run provide` on the strong box; no HTTP |
 | `src/http/` | OpenAI-compatible surface; talks to the runtime, never the SDK |
 | `src/chat/answer.js` | the one seam a question passes through to become an answer |
 | `src/audio/wav.js` | PCM in and out of the RIFF container every client expects |

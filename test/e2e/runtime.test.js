@@ -21,6 +21,8 @@ describe('runtime lifecycle', { skip: enabled ? false : 'set MERIDIAN_E2E=1 to r
   it('loads the resident models and reports the tier it serves', () => {
     assert.equal(state.ready, true)
     assert.ok(['S', 'M', 'L'].includes(state.tier))
+    assert.equal(state.isDelegated, false)
+    assert.ok(state.mode === 'local' || state.mode === 'local-fallback')
     assert.deepEqual(state.models.map((model) => model.role).sort(), ['chat', 'embed'])
   })
 

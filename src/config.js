@@ -29,4 +29,14 @@ export const config = {
   // On-demand models (speech, vision) give their memory back this long after
   // the last request. The fleet laptop cannot hold them next to the chat model.
   idleUnloadMs: Number(process.env.MERIDIAN_IDLE_UNLOAD_MS ?? 5 * 60_000),
+  // Req 5.1 — consumer never starts a provider. Eval will not run `provide`
+  // and will block outbound network, so these stay empty unless a peer key is
+  // handed in from the strong box.
+  providerPublicKey: process.env.QVAC_PROVIDER_PUBLIC_KEY?.trim() || '',
+  forceLocal: process.env.QVAC_FORCE_LOCAL === '1',
+  assumeStrongPeer: process.env.QVAC_ASSUME_STRONG_PEER === '1',
+  heartbeatRetries: Number(process.env.QVAC_PEER_HEARTBEAT_RETRIES ?? 3),
+  heartbeatTimeoutMs: Number(process.env.QVAC_PEER_HEARTBEAT_TIMEOUT_MS ?? 15_000),
+  heartbeatRetryDelayMs: Number(process.env.QVAC_PEER_HEARTBEAT_RETRY_DELAY_MS ?? 1000),
+  delegateTimeoutMs: Number(process.env.QVAC_DELEGATE_TIMEOUT_MS ?? 60_000),
 }

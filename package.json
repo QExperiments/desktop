@@ -10,6 +10,7 @@
   "scripts": {
     "serve": "node index.js",
     "serve:stop": "node src/serve-stop.js",
+    "provide": "node src/p2p/provider.js",
     "models:fetch": "node scripts/models-fetch.js",
     "corpus:ingest": "node scripts/corpus-ingest.js",
     "test": "node --test 'test/unit/**/*.test.js'",
