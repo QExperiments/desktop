@@ -4,7 +4,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
 import * as lancedb from '@lancedb/lancedb'
-import { EMBEDDINGGEMMA_300M_Q4_0 } from '@qvac/sdk'
+import { EMBEDDINGGEMMA_300M_Q8_0 } from '@qvac/sdk'
 
 // The project root is derived from this file, so paths under data stay correct regardless of where the process is started.
 const appRoot = path.resolve(fileURLToPath(new URL('../../', import.meta.url)))
@@ -17,7 +17,7 @@ export const config = {
   manifestFile: path.join(appRoot, 'data', 'models', 'manifest.json'),
   vectorStoreDir: process.env.LANCE_DB_DIR || path.join(appRoot, 'data', 'lancedb'),
   tableName: process.env.LANCE_TABLE || 'meridian_corpus',
-  embeddingModelId: process.env.EMBEDDING_MODEL || 'EMBEDDINGGEMMA_300M_Q4_0',
+  embeddingModelId: process.env.EMBEDDING_MODEL || 'EMBEDDINGGEMMA_300M_Q8_0',
   chunkOpts: {
     chunkSize: Number(process.env.CHUNK_SIZE || 1024),
     chunkOverlap: Number(process.env.CHUNK_OVERLAP || 64),
@@ -31,16 +31,21 @@ export const config = {
   },
 }
 
-// Returns the embedding model source: the local file from the manifest when present and available, otherwise the registry model.
+// Returns the embedding model source. The model manager writes a manifest of
+// { version, tier, entries } where the embed entry lives under `embed:<tier>`
+// and carries the resolved path; when it is absent or missing on disk, fall
+// back to the registry model.
 export function getEmbeddingModelSrc() {
   try {
     const manifest = JSON.parse(fs.readFileSync(config.manifestFile, 'utf8'))
-    if (manifest.file && fs.existsSync(manifest.file)) {
-      return { modelSrc: manifest.file, modelType: 'llamacpp-embedding', modelId: manifest.modelId, local: true }
+    const tier = manifest.tier
+    const entry = (tier && manifest.entries?.[`embed:${tier}`]) || Object.values(manifest.entries || {}).find((e) => e.role === 'embed')
+    if (entry?.path && fs.existsSync(entry.path)) {
+      return { modelSrc: entry.path, modelType: entry.modelType || 'llamacpp-embedding', modelId: entry.constant || config.embeddingModelId, local: true }
     }
   } catch {
   }
-  return { modelSrc: EMBEDDINGGEMMA_300M_Q4_0, modelType: undefined, modelId: config.embeddingModelId, local: false }
+  return { modelSrc: EMBEDDINGGEMMA_300M_Q8_0, modelType: undefined, modelId: config.embeddingModelId, local: false }
 }
 
 let db
