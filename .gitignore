@@ -6,6 +6,7 @@ dist/
 models/
 .qvac/
 corpus/
+lancedb/
 CLAUDE.local.md
 AGENTS.override.md
 .env
