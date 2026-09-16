@@ -105,7 +105,7 @@ export async function evalRecall(kList = [3, 5, 10]) {
   const sum = { r3: 0, r5: 0, r10: 0 }
   for (const item of evalQueries) {
     const results = await search(item.query, maxK)
-    const files = results.map((r) => r.file)
+    const files = results.slice(0, maxK).map((r) => r.file)
     const rank = files.indexOf(item.doc_id)
     const hit = (k) => rank !== -1 && rank < k
     const row = {
