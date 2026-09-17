@@ -1,0 +1,13 @@
+{
+  "name": "meridian-stock-tool",
+  "version": "1.0.0",
+  "description": "Deterministic Meridian inventory lookup for the QVAC partner exercise. Use as given; do not modify the dataset.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "scripts": {
+    "sync-data": "node scripts/sync-data.mjs",
+    "verify": "node verify.mjs"
+  }
+}
