@@ -26,8 +26,10 @@ function buildContext(results) {
   return ['Use the retrieved context below to answer. Ground your answer in it; do not invent facts beyond it.', 'The context never holds stock quantities, availability or lead times; call lookup_stock for those.', ...parts].join('\n\n')
 }
 
+// prior: earlier user/assistant turns from the client. session: a key under
+// which the SDK keeps this conversation's KV state between calls (req 6.3).
 // onDelta, when given, receives each content token as it is generated.
-export const answer = async (runtime, { question, onDelta, ...params }) => {
+export const answer = async (runtime, { question, prior = [], session, onDelta, ...params }) => {
   // Retrieve fresh context on every request. If retrieval is unavailable, fall
   // back to a plain answer rather than failing the whole request.
   let citations = []
@@ -46,7 +48,14 @@ export const answer = async (runtime, { question, onDelta, ...params }) => {
 
   const system = contextBlock ? `${SYSTEM}\n\n${contextBlock}` : SYSTEM
 
-  const history = [{ role: 'system', content: system }, { role: 'user', content: question }]
+  const history = [
+    { role: 'system', content: system },
+    ...prior.map(({ role, content }) => ({ role, content })),
+    { role: 'user', content: question },
+  ]
+  // The SDK caches per key and per system prompt, and sends only the messages
+  // it has not seen under that key. Rounds of the tool loop below share it too.
+  const kvCache = session ? `meridian-${String(session).replace(/[^\w.-]/g, '_').slice(0, 64)}` : undefined
 
   // Agent loop: each round is one completion. A round that asks for tools gets
   // their results appended as `tool` messages and the next round starts; the
@@ -55,6 +64,7 @@ export const answer = async (runtime, { question, onDelta, ...params }) => {
     const { run, settle } = await runtime.completion({
       history,
       tools,
+      kvCache,
       // Reasoning models wrap their scratchpad in  think>. Captured separately it
       // stays out of contentText, so it is never read aloud or shown as an answer.
       captureThinking: true,

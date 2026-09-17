@@ -156,3 +156,30 @@ cannot answer; it does not reach the stock tool. Because the system
 prompt changes with every question, the SDK's KV cache (keyed on system
 prompt + tools) cannot carry a prefix between questions; req 6.3 has to
 live with that or change the layout.
+
+## ADR-010 — KV cache keyed by the client's session, opt-in
+
+**Context.** Req 6.3 asks for KV reuse across turns under a per-session
+key. The SDK's `kvCache: "<key>"` stores `{key}/{modelId}/{configHash}.bin`,
+where `configHash` covers the system prompt and the tool block, primes
+the system prompt once, and on later calls sends only the messages it has
+not yet seen under that key. A stock OpenAI client has no session field,
+but it does have `user`.
+
+**Decision.** `/v1/chat/completions` takes the session from the request's
+`user` field or an `x-session-id` header and passes it as
+`meridian-<session>`. Without either, no cache is used. The route also
+forwards the client's earlier user and assistant turns (the last six) so
+the model has the conversation with or without a cache. Rounds of the tool
+loop share the key.
+
+**Consequences.** Measured on tier M: within one question the tool loop's
+second round reuses the cache and sends one message, 5.0 s against 6.8 s
+uncached. Across turns a hit needs the same system prompt, and ADR-009
+puts the retrieved context there, so consecutive questions on the same
+topic hit and topic changes miss; three turns of one session produced
+three cache files. Each file is about 33 MB and nothing deletes them yet.
+Two follow-ups, not taken: wipe `meridian-*` caches at server start
+(sessions do not outlive the process anyway), and give keyless requests
+an ephemeral key deleted after the answer so every request gets the
+in-question reuse.
