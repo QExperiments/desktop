@@ -44,21 +44,28 @@ export const createServer = (runtime) => {
 
   app.post(`${api}/chat/completions`, async (request, reply) => {
     const messages = Array.isArray(request.body?.messages) ? request.body.messages : []
-    const question = messages.filter((message) => message?.role === 'user').at(-1)?.content
-    if (typeof question !== 'string' || question.trim() === '') {
+    const lastUser = messages.findLastIndex((message) => message?.role === 'user')
+    const query = messages[lastUser]?.content
+    if (typeof query !== 'string' || query.trim() === '') {
       return openaiError(reply, 400, 'messages must end with a user message carrying text content', 'invalid_request_error')
     }
-    // Earlier turns go to the model as the client sent them; the chat model's
-    // ctx_size (4096 in models.json) is the only bound. A session key (OpenAI's
-    // `user` field or an x-session-id header) lets the SDK keep the KV state
-    // between calls.
-    const lastUser = messages.findLastIndex((message) => message?.role === 'user')
-    const prior = messages.slice(0, lastUser)
-      .filter((message) => (message?.role === 'user' || message?.role === 'assistant') && typeof message.content === 'string')
+    // A session key (OpenAI's `user` field or an x-session-id header) lets the
+    // SDK keep the KV state between calls. With a session the stored turns are
+    // the model's history: they hold the messages exactly as the model saw
+    // them, which the cache needs to line up, so the client's earlier turns are
+    // ignored and only its last query is used. Without a session the client's
+    // history goes to the model as sent; the chat model's ctx_size is the bound.
     const header = request.headers['x-session-id']
     const session = typeof request.body?.user === 'string' ? request.body.user : Array.isArray(header) ? header[0] : header
-    const remember = (text, citations) => {
-      if (session) sessions.append(session, { kind: 'text', question, answer: text, citations }).catch((error) => request.log.warn(error))
+    const stored = session ? await sessions.context(session) : null
+    const prior = stored
+      ? stored.messages
+      : messages.slice(0, lastUser).filter((message) => (message?.role === 'user' || message?.role === 'assistant') && typeof message.content === 'string')
+    const shown = stored?.shown ?? []
+    const remember = ({ text, citations, messages: added, hits }) => {
+      if (!session) return
+      const turn = { kind: 'text', query, answer: text, citations, messages: added, shown: hits.filter((hit) => !hit.reused).map((hit) => hit.id) }
+      sessions.append(session, turn).catch((error) => request.log.warn(error))
     }
 
     const generationParams = {}
@@ -78,10 +85,10 @@ export const createServer = (runtime) => {
         send({ id, object: 'chat.completion.chunk', created, model: config.chatModel, choices: [{ index: 0, delta, finish_reason }], ...extra })
       try {
         let first = true
-        const { text, citations } = await answer(runtime, {
-          question,
-          prior,
+        const result = await answer(runtime, {
+          messages: [...prior, { role: 'user', content: query }],
           session,
+          shown,
           generationParams,
           onDelta: (content) => {
             if (first && content.trim() === '') return // the model's leading blank lines
@@ -90,13 +97,14 @@ export const createServer = (runtime) => {
             chunk({ content })
           },
         })
+        const { text, citations } = result
         // Nothing streamed (the model wrote no prose) but answer() still has text.
         if (first && text) {
           chunk({ role: 'assistant' })
           chunk({ content: text })
         }
         chunk({ citations }, 'stop', { grounded: citations.length > 0 })
-        remember(text, citations)
+        remember(result)
       } catch (error) {
         request.log.error(error)
         send({ error: { message: error.message, type: 'server_error' } })
@@ -106,8 +114,9 @@ export const createServer = (runtime) => {
       return reply
     }
 
-    const { text, citations } = await answer(runtime, { question, prior, session, generationParams })
-    remember(text, citations)
+    const result = await answer(runtime, { messages: [...prior, { role: 'user', content: query }], session, shown, generationParams })
+    const { text, citations } = result
+    remember(result)
 
     return {
       id,

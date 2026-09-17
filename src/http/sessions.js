@@ -5,7 +5,15 @@ import { join } from 'node:path'
 const VALID = /^[\w.-]{1,64}$/
 
 // One JSON file per session under data/sessions. It stays on this disk next
-// to the corpus index; the chat page reads it back to show earlier chats.
+// to the corpus index; the chat page reads it back to show earlier chats, and
+// the chat route reads it back as the model's history.
+//
+// A turn stores two views of itself. `query` and `answer` are what the person
+// saw. `messages` are what the model saw: the user turn with its document
+// excerpts, tool calls, tool results, the final answer. The SDK's KV cache
+// keeps count of the messages it has stored under the session key and sends
+// only the tail, so the replayed history has to match the original message
+// for message. `shown` lists the chunk ids the turn put in front of the model.
 export const createSessions = (dir) => {
   const queues = new Map()
   const file = (id) => join(dir, `${id}.json`)
@@ -33,7 +41,7 @@ export const createSessions = (dir) => {
     return serial(id, async () => {
       await mkdir(dir, { recursive: true })
       const now = new Date().toISOString()
-      const session = (await read(id)) ?? { id, title: String(turn.question ?? '').slice(0, 80), createdAt: now, turns: [] }
+      const session = (await read(id)) ?? { id, title: String(turn.query ?? '').slice(0, 80), createdAt: now, turns: [] }
       session.turns.push({ at: now, ...turn })
       session.updatedAt = now
       await writeFile(file(id), JSON.stringify(session))
@@ -50,12 +58,21 @@ export const createSessions = (dir) => {
       .map(({ id, title, createdAt, updatedAt, turns }) => ({ id, title, createdAt, updatedAt, turns: turns.length }))
   }
 
-  // The stored turns as chat history, for a route that gets no history from its client.
-  const history = async (id) =>
-    ((await get(id))?.turns ?? []).flatMap((turn) => [
-      { role: 'user', content: turn.question },
-      { role: 'assistant', content: turn.answer },
-    ])
+  // The model's view of a session: every message its turns added, in order,
+  // plus the chunks already shown. A turn written before messages were stored
+  // is replayed as the plain question and answer.
+  const context = async (id) => {
+    const turns = (await get(id))?.turns ?? []
+    return {
+      messages: turns.flatMap((turn) => turn.messages ?? [
+        { role: 'user', content: turn.query ?? turn.question ?? '' },
+        { role: 'assistant', content: turn.answer ?? '' },
+      ]),
+      shown: turns.flatMap((turn) => turn.shown ?? []),
+    }
+  }
 
-  return { get, append, list, history }
+  const history = async (id) => (await context(id)).messages
+
+  return { get, append, list, context, history }
 }

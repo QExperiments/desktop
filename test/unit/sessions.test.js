@@ -9,32 +9,58 @@ let dir
 before(async () => { dir = await mkdtemp(join(tmpdir(), 'sessions-')) })
 after(() => rm(dir, { recursive: true, force: true }))
 
-test('append creates the session, keeps order and titles it by the first question', async () => {
+const turn = (query, answer, extra = {}) => ({ kind: 'text', query, answer, citations: [], ...extra })
+
+test('append creates the session, keeps order and titles it by the first query', async () => {
   const sessions = createSessions(dir)
   await Promise.all([
-    sessions.append('s1', { kind: 'text', question: 'P1 SLA?', answer: '4 hours', citations: [{ file: 'a.txt' }] }),
-    sessions.append('s1', { kind: 'voice', question: 'And P2?', answer: '8 hours', citations: [] }),
+    sessions.append('s1', { ...turn('P1 SLA?', '4 hours'), kind: 'text', citations: [{ file: 'a.txt' }] }),
+    sessions.append('s1', { ...turn('And P2?', '8 hours'), kind: 'voice' }),
   ])
   const stored = await sessions.get('s1')
   assert.equal(stored.title, 'P1 SLA?')
-  assert.deepEqual(stored.turns.map((turn) => turn.kind), ['text', 'voice'])
+  assert.deepEqual(stored.turns.map((t) => t.kind), ['text', 'voice'])
   assert.deepEqual(await sessions.history('s1'), [
     { role: 'user', content: 'P1 SLA?' }, { role: 'assistant', content: '4 hours' },
     { role: 'user', content: 'And P2?' }, { role: 'assistant', content: '8 hours' },
   ])
 })
 
+test('context replays the messages the model saw and the chunks it was shown', async () => {
+  const sessions = createSessions(dir)
+  const messages = [
+    { role: 'user', content: 'Document excerpts:\n\n[1] source: a.txt\nMOQ 500\n\nQuestion: MOQ?' },
+    { role: 'assistant', content: '<tool_call>{"name":"lookup_stock"}</tool_call>' },
+    { role: 'tool', content: '{"matches":[]}' },
+    { role: 'assistant', content: 'MOQ is 500.' },
+  ]
+  await sessions.append('s3', turn('MOQ?', 'MOQ is 500.', { messages, shown: ['a.txt::0'] }))
+  await sessions.append('s3', turn('And lead time?', '6 weeks', { messages: [{ role: 'user', content: 'And lead time?' }, { role: 'assistant', content: '6 weeks' }], shown: [] }))
+  const context = await sessions.context('s3')
+  assert.deepEqual(context.shown, ['a.txt::0'])
+  assert.equal(context.messages.length, 6)
+  assert.deepEqual(context.messages.slice(0, 4), messages)
+  assert.deepEqual(context.messages.at(-1), { role: 'assistant', content: '6 weeks' })
+})
+
+test('a turn stored before messages were kept replays as its question and answer', async () => {
+  const sessions = createSessions(dir)
+  await sessions.append('s4', { kind: 'text', question: 'Old?', answer: 'Yes', citations: [] })
+  assert.deepEqual((await sessions.context('s4')).messages, [{ role: 'user', content: 'Old?' }, { role: 'assistant', content: 'Yes' }])
+})
+
 test('list is newest first with turn counts and no transcript', async () => {
   const sessions = createSessions(dir)
-  await sessions.append('s2', { kind: 'image', question: 'What is this?', answer: 'A nameplate', citations: [] })
+  await sessions.append('s2', turn('What is this?', 'A nameplate', { kind: 'image' }))
   const listed = await sessions.list()
-  assert.deepEqual(listed.map((s) => [s.id, s.turns]), [['s2', 1], ['s1', 2]])
+  assert.deepEqual(listed.slice(0, 2).map((s) => [s.id, s.turns]), [['s2', 1], ['s4', 1]])
   assert.equal('turns' in listed[0] && Array.isArray(listed[0].turns), false)
 })
 
 test('ids outside the safe alphabet are ignored, never written', async () => {
   const sessions = createSessions(dir)
-  assert.equal(await sessions.append('../etc/passwd', { question: 'x', answer: 'y' }), null)
+  assert.equal(await sessions.append('../etc/passwd', turn('x', 'y')), null)
   assert.equal(await sessions.get('../etc/passwd'), null)
   assert.deepEqual(await sessions.history('nope'), [])
+  assert.deepEqual(await sessions.context('nope'), { messages: [], shown: [] })
 })

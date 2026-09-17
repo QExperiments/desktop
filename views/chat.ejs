@@ -173,7 +173,7 @@
         chat = {
           session: id,
           history: (stored.turns ?? []).flatMap((turn) => [
-            { role: 'user', content: turn.question, thumb: turn.thumb },
+            { role: 'user', content: turn.query ?? turn.question, thumb: turn.thumb },
             { role: 'assistant', content: turn.answer, citations: turn.citations, kind: turn.kind },
           ]),
         }
@@ -279,13 +279,13 @@
       }
       async function sendImage(content) {
         const { file, thumb } = attached
-        const question = content || 'What is in this photo?'
+        const query = content || 'What is in this photo?'
         const reply = { role: 'assistant', content: '', citations: [], kind: 'image' }
-        begin({ role: 'user', content: question, thumb }, reply)
+        begin({ role: 'user', content: query, thumb }, reply)
         setAttached(null)
         $('q').value = ''
         try {
-          const json = await postForm(`${api}/images/ask`, { session: chat.session, question, thumb }, file, file.name)
+          const json = await postForm(`${api}/images/ask`, { session: chat.session, query, thumb }, file, file.name)
           reply.content = json.answer
           paint()
         } catch (error) {
@@ -369,7 +369,7 @@
         paint()
         try {
           const json = await postForm(`${api}/audio/ask`, { session: chat.session, language: 'en' }, blob, 'mic.wav')
-          chat.history.at(-2).content = json.question
+          chat.history.at(-2).content = json.query
           reply.content = json.answer
           reply.citations = json.citations ?? []
           paint()

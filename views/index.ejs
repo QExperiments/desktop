@@ -513,7 +513,7 @@
 
       const runAsk = async (blob, name) => {
         const json = await postFile(`${api}/audio/ask`, blob, name, { language: 'en' })
-        show('ask-out', `Q: ${json.question}\nA: ${json.answer}`)
+        show('ask-out', `Q: ${json.query}\nA: ${json.answer}`)
         if (json.audio?.base64) {
           $('ask-audio').src = `data:audio/wav;base64,${json.audio.base64}`
           $('ask-audio').play().catch(() => {})
@@ -554,7 +554,7 @@
         $('img-go').disabled = true
         show('img-out', '…')
         try {
-          const json = await postFile(`${api}/images/ask`, file, file.name, { question: $('img-q').value })
+          const json = await postFile(`${api}/images/ask`, file, file.name, { query: $('img-q').value })
           show('img-out', json.answer ?? json)
         } catch (error) {
           show('img-out', error.message)
