@@ -36,17 +36,13 @@ export const createServer = (runtime) => {
   })
 
   app.post(`${api}/chat/completions`, async (request, reply) => {
-    if (process.env.MERIDIAN_UNGROUNDED !== '1') {
-      return openaiError(reply, 501, 'chat completions arrive with the retrieval stage; this build only manages models', 'not_implemented')
-    }
-
     const messages = Array.isArray(request.body?.messages) ? request.body.messages : []
     const question = messages.filter((message) => message?.role === 'user').at(-1)?.content
     if (typeof question !== 'string' || question.trim() === '') {
       return openaiError(reply, 400, 'messages must end with a user message carrying text content', 'invalid_request_error')
     }
     if (request.body?.stream) {
-      return openaiError(reply, 501, 'streaming arrives with the retrieval stage', 'not_implemented')
+      return openaiError(reply, 501, 'streaming is not supported yet', 'not_implemented')
     }
 
     const generationParams = {}
@@ -62,7 +58,7 @@ export const createServer = (runtime) => {
       created: Math.floor(Date.now() / 1000),
       model: config.chatModel,
       choices: [{ index: 0, message: { role: 'assistant', content: text, citations }, finish_reason: 'stop' }],
-      grounded: false,
+      grounded: citations.length > 0,
     }
   })
 

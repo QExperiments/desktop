@@ -108,3 +108,22 @@ captured separately so reasoning is never spoken or shown.
 **Consequences.** Voice answers are currently ungrounded, and the README
 says so. When retrieval lands, the loop becomes grounded without a change
 to the audio routes.
+
+## ADR-008 — `POST /v1/chat/completions` is open; ADR-004 is superseded
+
+**Context.** ADR-004 returned 501 so that a pass-through without retrieval
+could not survive to submission. Retrieval now exists behind
+`src/chat/answer.js` (M-3), and `npm run corpus:ingest` fills the index
+(N-8). The condition ADR-004 guarded against no longer holds.
+
+**Decision.** Drop the 501 and the `MERIDIAN_UNGROUNDED` flag. The route
+always goes through `answer()`, which retrieves, grounds and cites.
+`grounded` on the response is `true` only when retrieval returned chunks,
+so an empty index still cannot pass as a grounded answer.
+The chat model loads with `ctx_size: 4096` (SDK default 1024) and the
+corpus is chunked at 512 tokens, so three retrieved chunks plus the answer
+fit; the first live call overflowed 1024 with whole-document chunks.
+
+**Consequences.** The eval harness can score the route. Streaming still
+answers 501 until it is built (req 2.4). Tools are not yet in the loop
+(req 3); until they are, 6.1.1 is met for retrieval and grounding only.

@@ -124,7 +124,7 @@
       .hint { font-size: 0.85rem; margin: 0 0 0.6rem; }
     </style>
   </head>
-  <body data-api="<%= apiPrefix %>" data-ungrounded="<%= ungrounded ? '1' : '' %>">
+  <body data-api="<%= apiPrefix %>">
     <header>
       <h1>Test Console</h1>
       <p>Chat needs <code>MERIDIAN_UNGROUNDED=1</code> on serve. ASR/TTS load on first use.</p>
@@ -182,7 +182,7 @@
 
     <section>
       <h2>Hands-free ask</h2>
-      <p class="hint">Speech in, ungrounded chat, speech back. Needs ASR + TTS + chat.</p>
+      <p class="hint">Speech in, grounded chat, speech back. Needs ASR + TTS + chat.</p>
       <label class="pick">
         <input id="ask-file" type="file" accept="audio/*,.wav" />
         <span class="pick-btn">Choose wav</span>
@@ -214,7 +214,6 @@
     <script>
       const body = document.body
       const api = body.dataset.api || '/v1'
-      const ungrounded = body.dataset.ungrounded === '1'
       const $ = (id) => document.getElementById(id)
 
       const show = (id, value) => {
@@ -259,9 +258,7 @@
         }
       }
 
-      $('chat-hint').textContent = ungrounded
-        ? 'Chat is enabled for this process.'
-        : 'Chat will 501 until serve is started with MERIDIAN_UNGROUNDED=1.'
+      $('chat-hint').textContent = 'Answers are grounded in the ingested corpus; citations name the files.'
 
       paint(JSON.parse($('boot').textContent))
 
