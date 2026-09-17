@@ -187,6 +187,19 @@ npm run test:e2e  # needs MERIDIAN_E2E=1 and a completed models:fetch
 P2P live checks (two processes, real DHT) are not in CI. Walk through
 [docs/p2p-test.md](docs/p2p-test.md).
 
+## Evals
+
+```bash
+npm run eval                                   # all categories on the tier in evals/config.json
+npm run eval -- --tier M --only tools --runs 1 --no-judge
+```
+
+`evals/run.mjs` starts a fresh `serve` on port 11435, replays the scripted
+cases under `evals/cases/`, scores every answer in code, samples memory
+through load, generation and unload, grades the `single` answers with a
+local judge model, and writes `evals/results/<ts>/report.html`. Format of
+the cases, metrics and the judge: [evals/README.md](evals/README.md).
+
 ## Repository
 
 | Path | What |
@@ -201,4 +214,5 @@ P2P live checks (two processes, real DHT) are not in CI. Walk through
 | `scripts/models-fetch.js` | provisioning, the one step that uses the network |
 | `models.json` | roles, tiers, checksums, mirrors |
 | `qvac-eval.json` | the contract the Tether harness runs |
+| `evals/` | our own eval harness: cases, runner, metrics, judge, report |
 | `qvac.config.json` | the QVAC plugins this build includes |
