@@ -1,7 +1,8 @@
 # Requirements checklist
 
 Source: `context/qvac-challenge-requirements.md`. State verified against
-`origin/develop` at commit `2cf6e4d` on 2026-09-16.
+`origin/develop` at commit `7f4f5f0` on 2026-09-17, after PR #22 merged the
+M-3 ingestion and RAG work.
 
 `[x]` shipped and exercised by a test or a live check · `[~]` partially there,
 the gap is named · `[ ]` not started.
@@ -36,24 +37,51 @@ that are not code.
 
 ## Req #2 — Showing a wrong number to a customer is unacceptable
 
-- [ ] **2.1** Ingest `corpus.zip` as given.
-  *`scripts/corpus-ingest.js` is a three-line stub that exits 0 so the
-  `qvac-eval.json` setup chain already runs. No corpus is on disk.*
-- [ ] **2.2** RAG over the private corpus with QVAC embeddings, answers carry
+- [~] **2.1** Ingest `corpus.zip` as given.
+  *The pipeline exists — `src/rag/ingest.mjs` walks the corpus, parses per file
+  type and chunks with `ragChunk()`. **Nothing calls it.** `ingest()` is
+  exported and has no caller anywhere in `src/`, `scripts/` or `test/`, while
+  `npm run corpus:ingest` still runs the same three-line stub that prints
+  "nothing to do" and exits 0. `qvac-eval.json` declares that script in `setup`,
+  so the harness would set up an empty store and never notice.*
+- [~] **2.2** RAG over the private corpus with QVAC embeddings, answers carry
   citations to the source document.
-  *`runtime.embed()` exists and the embedding model is resident, but nothing
-  calls it. `citations` is always `[]`.*
-- [ ] **2.3** Persist embeddings to a local vector store, schema matched to the
+  *Wired end to end in `src/chat/answer.js`: every question runs `search()`,
+  the top 3 chunks go into the system prompt as a context block with an explicit
+  "do not invent facts beyond it", and `citations` is filled with
+  `{ file, score }`. Retrieval failure degrades to a plain answer instead of
+  failing the request. **Never run against a corpus and not covered by a single
+  test**, so it is code-complete and unverified.*
+- [x] **2.3** Persist embeddings to a local vector store, schema matched to the
   embedding model's dimensionality.
-  *No store chosen yet. The e2e test already asserts the embedding dimension so
-  the schema has something to match.*
-- [~] **2.4** Streaming generation.
+  *LanceDB in `src/rag/store.mjs`, table `meridian_corpus` under `data/lancedb`.
+  Rows are `{ id, vector, text, ...metadata }` built through `ragChunk()` and
+  `embed()`, so the vector width comes from the embedding model itself rather
+  than a hard-coded number. Search is hybrid: cosine plus a full-text index,
+  the two rankings fused.*
+- [ ] **2.4** Streaming generation.
   *The SDK stream is consumed internally (`run.events`, `contentDelta`), which
   is how the voice loop works. Nothing is streamed to an HTTP client:
   `stream: true` on `/v1/chat/completions` returns 501, and there is no SSE.*
 
-**Block status: not started. This is the critical path — 2.2 and 6.1.1 are the
-same work, and the eval harness checks the cited source.**
+**Block status: the hard part is built, the cheap part is missing. One caller
+for `ingest()` turns three partials into a working corpus path.**
+
+### Two things M-3 broke on the way in
+
+- **The SDK boundary.** `ARCHITECTURE.md` D3 and `README.md:160` both state that
+  `src/runtime/` is the only module that imports `@qvac/sdk`. All three new
+  files — `rag/ingest.mjs`, `rag/retrieve.mjs`, `rag/store.mjs` — import it
+  directly. Consequences, not style: retrieval never enters the cancel registry,
+  so req 1.4 no longer covers it; and it ignores the tier and delegation logic
+  in `src/runtime/`.
+- **A second embedding model in memory.** `retrieve.mjs` calls `loadModel()`
+  itself and caches its own `modelId`, while the runtime already holds `embed`
+  as a resident role. With `serve` running, EmbeddingGemma is loaded twice —
+  2 × 328 MB. On the 8 GB fleet laptop from constraint C4 that is the exact
+  failure this project is supposed to avoid. `ingest.mjs` additionally calls
+  `close()`, which tears down the shared Bare worker, so it can never be called
+  in-process from the server.
 
 ---
 
@@ -89,9 +117,11 @@ same work, and the eval harness checks the cited source.**
     chunk`.*
 - [~] **4.2** Hands-free loop: spoken question → **grounded** answer → TTS.
   *`POST /v1/audio/ask` closes the loop end to end in ~1.1 s on tier S: audio
-  in, text and audio out. The answer is **not grounded** — retrieval is Req #2.
-  The loop already runs through `src/chat/answer.js`, the one seam grounding
-  will land in, so both this and `/v1/chat/completions` gain it at once.*
+  in, text and audio out. Grounding arrived with M-3 — the loop goes through
+  `src/chat/answer.js`, which now retrieves and cites. The bet that one seam
+  would serve both callers paid off. It stays partial for the same reason as
+  2.2: with no corpus ingested, `search()` returns nothing and the loop answers
+  ungrounded with an empty `citations`.*
 - [x] **4.3** Image + text in one VLM context.
   *`POST /v1/images/ask`. The e2e test sends two generated PNGs and asserts the
   answers differ (`Green.` vs `Blue`), which is what proves the model looks at
@@ -137,23 +167,27 @@ same work, and the eval harness checks the cited source.**
   route does not yet run the product.*
   - [ ] **6.1.1** `POST /v1/chat/completions` must run retrieval, grounding and
     tools. A pass-through does not satisfy this.
-    *Returns **501 on purpose** (ADR-004). `MERIDIAN_UNGROUNDED=1` enables an
-    ungrounded answer for local testing only; `serve`, `qvac-eval.json` and CI
-    never set it. Asked for a ServoDrive X4 lead time with no corpus, the model
-    invented "approximately 12 to 14 weeks" — which is exactly why the route
-    refuses by default.*
+    *Still returns **501 by default**, gated behind `MERIDIAN_UNGROUNDED=1`.
+    **The reason recorded in ADR-004 has expired**: it refused because a
+    pass-through without retrieval would ship, and retrieval now exists on the
+    other side of `answer()`. What is left is a decision plus 2.1 — open the
+    route, ingest a corpus, and this is the item that is no longer blocked by
+    missing code. ADR-004 needs a successor entry either way.*
   - [~] **6.1.2** Machine-readable `citations` array on the response message.
-    *The array is on the response and always empty. Shape is fixed (`file`
-    required, `score` optional, `file` relative to the corpus root); the content
-    waits on Req #2.*
+    *Now populated from retrieval as `{ file, score }`, the exact shape §5.2
+    asks for. Unverified: `file` must be relative to the corpus root as shipped
+    in `corpus.zip`, and with nothing ingested nobody has checked that the
+    stored path matches that form.*
   - [x] **6.1.3** Honour `temperature` and `seed`.
     *Both mapped onto `generationParams`. Verified live: two runs at
     `seed: 42, temperature: 0` returned identical text word for word.*
-  - [x] **6.1.4** Declare how to run everything in `qvac-eval.json` at the repo
+  - [~] **6.1.4** Declare how to run everything in `qvac-eval.json` at the repo
     root.
     *All nine required fields present, port 11434, `readyPath` `/models`,
-    600 s timeout, model ids `meridian-assistant` and `meridian-embed`.
-    `start` needs no network.*
+    600 s timeout, model ids `meridian-assistant` and `meridian-embed`, and
+    `start` needs no network. Downgraded from done: `setup` promises
+    `npm run corpus:ingest`, and that script is still the stub. The file now
+    declares a step the repository does not perform.*
 - [~] **6.2** Lean, plugin-scoped bundle instead of building against the full
   SDK.
   - [x] **6.2.1** Only the plugins actually used, via `plugins` in
@@ -249,17 +283,32 @@ start while Req #2, #3 and 6.1.1/6.2.2/6.3 are open.
 
 ## Where this stands
 
-| Block | Done | Partial | Open |
-|---|---|---|---|
-| Req #1 — on-device | 4 | 0 | 0 |
-| Req #2 — RAG and citations | 0 | 1 | 3 |
-| Req #3 — tools | 0 | 0 | 3 |
-| Req #4 — voice and vision | 4 | 1 | 0 |
-| Req #5 — weak laptop | 3 | 0 | 0 |
-| Req #6 — API and footprint | 3 | 3 | 3 |
-| **Mandatory total** | **14** | **5** | **12** |
+| Block | Items | Done | Partial | Open |
+|---|---|---|---|---|
+| Req #1 — on-device | 4 | 4 | 0 | 0 |
+| Req #2 — RAG and citations | 4 | 1 | 2 | 1 |
+| Req #3 — tools | 3 | 0 | 0 | 3 |
+| Req #4 — voice and vision | 5 | 4 | 1 | 0 |
+| Req #5 — weak laptop | 3 | 3 | 0 | 0 |
+| Req #6 — API and footprint | 9 | 2 | 4 | 3 |
+| **Mandatory total** | **28** | **14** | **7** | **7** |
 
-Two blocks are complete (#1, #5), one is complete but for grounding (#4), and
-three are the remaining work (#2, #3, #6). Req #2 unblocks the most: it turns
-4.2 into a grounded loop, fills 6.1.2, and is most of 6.1.1 — which is the one
-route the submission is actually scored through.
+Two blocks are complete (#1, #5). Req #3 is the only one still untouched. The
+rest is finishing, not building.
+
+**What is left, in the order that unblocks the most:**
+
+1. **Call `ingest()`.** Replace the stub in `scripts/corpus-ingest.js` with a
+   caller and put the corpus in place. This alone moves 2.1, 2.2, 4.2, 6.1.2 and
+   6.1.4 from partial to verifiable, because every one of them is waiting on the
+   same missing corpus rather than on missing code.
+2. **Open `/v1/chat/completions` (6.1.1).** Its stated reason has expired now
+   that retrieval exists. Needs the route ungated, a successor to ADR-004, and
+   proof that `citations[].file` is relative to the corpus root.
+3. **Put `src/rag/` back behind the runtime.** Restores D3, stops loading
+   EmbeddingGemma twice, and brings retrieval back under the cancel registry.
+4. **Test the RAG path.** Thirty-four tests pass and not one touches `src/rag/`.
+   The recall harness in `retrieve.mjs` already has the query set for it.
+5. **Tools (3.1).** The only block with nothing written.
+6. **Then 6.2.2 and 6.3** — the tree-shaken build with its size report, and the
+   per-session KV cache key.
