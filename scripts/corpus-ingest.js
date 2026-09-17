@@ -1,21 +1,12 @@
-// Real corpus ingest (Stage 2). Runs the RAG pipeline from src/rag/ingest.mjs:
-// parses the corpus, chunks it, embeds and stores it in LanceDB, then builds
-// the full-text index. Use `-- --force` to drop and rebuild the whole
-// collection (required after changing chunk config).
-//
-// Prerequisites: `npm run models:fetch` so the embedding model is provisioned.
-import { parseArgs } from 'node:util'
+import { existsSync } from 'node:fs'
 import { ingest } from '../src/rag/ingest.mjs'
+import { config } from '../src/rag/store.mjs'
 
-const { values } = parseArgs({
-  options: {
-    force: { type: 'boolean', default: false },
-  },
-})
-
-try {
-  await ingest({ force: values.force })
-} catch (error) {
-  console.error(`corpus:ingest failed: ${error.message}`)
-  process.exitCode = 1
+// qvac-eval.json runs this in `setup`. The corpus is expected unpacked at
+// data/corpus, so `unzip corpus.zip -d data/` is the one step before it.
+if (!existsSync(config.corpusDir)) {
+  console.error(`corpus:ingest: ${config.corpusDir} not found — run: unzip corpus.zip -d data/`)
+  process.exit(1)
 }
+
+await ingest({ force: process.argv.includes('--force') })

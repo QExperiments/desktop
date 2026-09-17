@@ -16,7 +16,6 @@ export const registerUi = async (app, runtime) => {
   const page = async (_request, reply) =>
     reply.view('index', {
       apiPrefix: config.apiPrefix,
-      ungrounded: process.env.MERIDIAN_UNGROUNDED === '1',
       snapshot: runtime.snapshot(),
     })
 

@@ -124,7 +124,7 @@
       .hint { font-size: 0.85rem; margin: 0 0 0.6rem; }
     </style>
   </head>
-  <body data-api="<%= apiPrefix %>" data-ungrounded="<%= ungrounded ? '1' : '' %>">
+  <body data-api="<%= apiPrefix %>">
     <header>
       <h1>Test Console</h1>
       <p>Chat needs <code>MERIDIAN_UNGROUNDED=1</code> on serve. ASR/TTS load on first use.</p>
@@ -136,7 +136,8 @@
         Local means this process is not delegated — the model runs locally.
         To send chat, ASR and TTS to a peer, run <code>npm run provide</code> on the other machine,
         then start this serve with <code>QVAC_PROVIDER_PUBLIC_KEY</code> set to the key it prints
-        and without <code>QVAC_FORCE_LOCAL=1</code>. Embeddings and vision stay on this machine.
+        and without <code>QVAC_FORCE_LOCAL=1</code>. If the peer drops, this box falls back locally
+        and reconnects when the provider returns. Embeddings and vision stay on this machine.
       </p>
       <div class="pills" id="pills"></div>
       <div class="row">
@@ -182,7 +183,7 @@
 
     <section>
       <h2>Hands-free ask</h2>
-      <p class="hint">Speech in, ungrounded chat, speech back. Needs ASR + TTS + chat.</p>
+      <p class="hint">Speech in, grounded chat, speech back. Needs ASR + TTS + chat.</p>
       <label class="pick">
         <input id="ask-file" type="file" accept="audio/*,.wav" />
         <span class="pick-btn">Choose wav</span>
@@ -214,7 +215,6 @@
     <script>
       const body = document.body
       const api = body.dataset.api || '/v1'
-      const ungrounded = body.dataset.ungrounded === '1'
       const $ = (id) => document.getElementById(id)
 
       const show = (id, value) => {
@@ -252,6 +252,7 @@
         }
         add('ready', snapshot.ready === true, snapshot.ready)
         add('mode', snapshot.mode ?? '—')
+        add('peer', snapshot.peerOnline === true, snapshot.peerOnline)
         add('tier', snapshot.tier ?? '—')
         add('delegated', snapshot.isDelegated === true, snapshot.isDelegated)
         for (const model of snapshot.models ?? []) {
@@ -259,9 +260,7 @@
         }
       }
 
-      $('chat-hint').textContent = ungrounded
-        ? 'Chat is enabled for this process.'
-        : 'Chat will 501 until serve is started with MERIDIAN_UNGROUNDED=1.'
+      $('chat-hint').textContent = 'Answers are grounded in the ingested corpus; citations name the files.'
 
       paint(JSON.parse($('boot').textContent))
 

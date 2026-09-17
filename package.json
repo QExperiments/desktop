@@ -11,14 +11,15 @@
     "serve": "node index.js",
     "serve:stop": "node src/serve-stop.js",
     "provide": "node src/p2p/provider.js",
+    "identity": "node src/p2p/identity.js",
     "models:fetch": "node scripts/models-fetch.js",
     "corpus:ingest": "node scripts/corpus-ingest.js",
     "eval:retrieval": "node scripts/eval-retrieval.js",
     "test": "node --test 'test/unit/**/*.test.js'",
     "test:e2e": "node --test --test-timeout=1800000 'test/e2e/**/*.test.js'",
     "eval": "node scripts/stub.js eval",
-    "build": "node scripts/stub.js build",
-    "build:full": "node scripts/stub.js build:full"
+    "build": "node scripts/build.js",
+    "build:full": "node scripts/build.js --full"
   },
   "repository": {
     "type": "git",
@@ -30,11 +31,15 @@
   "homepage": "https://github.com/QExperiments/desktop#readme",
   "license": "ISC",
   "dependencies": {
-    "@lancedb/lancedb": "^0.38.0",
     "@fastify/multipart": "^10.1.1",
     "@fastify/view": "^12.0.0",
+    "@lancedb/lancedb": "^0.38.0",
     "@qvac/sdk": "^0.18.2",
     "ejs": "^6.0.1",
-    "fastify": "^5.12.4"
+    "fastify": "^5.12.4",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
   }
 }
