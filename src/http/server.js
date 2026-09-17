@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import multipart from '@fastify/multipart'
 import Fastify from 'fastify'
-import { answer } from '../chat/answer.js'
+import { answer, kvCacheKey } from '../chat/answer.js'
 import { config } from '../config.js'
 import { treeRss } from '../system/rss.js'
 import { registerMedia } from './media.js'
@@ -19,6 +19,16 @@ export const createServer = (runtime) => {
   const api = config.apiPrefix
   const sessions = createSessions(config.sessionsDir)
   const traces = createTraces(config.tracesDir)
+
+  // A session's KV-cache file is worth keeping only while the chat is likely
+  // to continue. When a new session starts, the files of every session past
+  // the newest few are deleted; the sessions themselves stay on disk and
+  // replay from their stored messages, paying one prefill, if reopened.
+  const pruneCaches = async () => {
+    const stale = (await sessions.list()).slice(config.cachedSessions)
+    for (const { id } of stale) await runtime.deleteCache(kvCacheKey(id))
+    if (stale.length) app.log.info({ deleted: stale.length, kept: config.cachedSessions }, 'kv-cache pruned')
+  }
 
   app.register(multipart, { limits: { fileSize: 32 * 1024 * 1024 } })
   app.register(async (scope) => registerUi(scope, runtime))
@@ -78,7 +88,9 @@ export const createServer = (runtime) => {
       const stats = { ...result.stats, rss }
       if (session) {
         const turn = { kind: 'text', query, answer: result.text, citations: result.citations, messages: result.messages, shown: result.hits.filter((hit) => !hit.reused).map((hit) => hit.id), requestId: id, usage: result.usage, stats }
-        sessions.append(session, turn).catch((error) => request.log.warn(error))
+        sessions.append(session, turn)
+          .then((saved) => (saved?.turns.length === 1 ? pruneCaches() : null))
+          .catch((error) => request.log.warn(error))
       }
       if (evalRun) {
         const trace = { id, run: evalRun, session: session ?? null, at: new Date().toISOString(), query, text: result.text, citations: result.citations, hits: result.hits.map(({ content, ...hit }) => hit), messages: result.messages, rounds: result.rounds, usage: result.usage, stats }

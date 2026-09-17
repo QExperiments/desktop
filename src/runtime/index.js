@@ -371,6 +371,13 @@ export const createRuntime = ({ log = logger } = {}) => {
   const embed = (text) =>
     hold('embed', (modelId) => registry.run({ kind: 'embeddings', role: 'embed' }, () => sdk.embed({ modelId, text })))
 
+  // Drops the KV-cache files the SDK keeps for one session key (req 6.3
+  // cleanup). Nothing else on disk is touched; the session's turns stay.
+  const deleteCache = (kvCacheKey) => sdk.deleteCache({ kvCacheKey }).catch((error) => {
+    log.warn({ kvCacheKey, err: error.message }, 'kv-cache delete failed')
+    return { success: false }
+  })
+
   const transcribe = (audio, params = {}) =>
     hold('asr', (modelId) => registry.run({ kind: 'transcription', role: 'asr' }, () =>
       sdk.transcribe({ modelId, audioChunk: audio, ...params })))
@@ -419,5 +426,5 @@ export const createRuntime = ({ log = logger } = {}) => {
     inflight: registry.list().map(({ abort, ...rest }) => rest),
   })
 
-  return { start, stop, acquire, release, completion, embed, transcribe, transcribeStream, speak, look, snapshot, cancel: registry.stop }
+  return { start, stop, acquire, release, completion, embed, deleteCache, transcribe, transcribeStream, speak, look, snapshot, cancel: registry.stop }
 }

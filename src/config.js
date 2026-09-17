@@ -26,6 +26,8 @@ export const config = {
   sessionsDir: abs('data/sessions'),
   // Written only for requests that carry `x-eval-run`; see src/http/trace.js.
   tracesDir: abs('data/traces'),
+  // How many of the newest sessions keep their KV-cache file on disk.
+  cachedSessions: Number(process.env.MERIDIAN_CACHED_SESSIONS ?? 5),
   importDir: process.env.MERIDIAN_MODELS_DIR ?? '',
   tierOverride: process.env.MERIDIAN_TIER?.toUpperCase() ?? '',
   logContent: process.env.LOG_CONTENT === '1',

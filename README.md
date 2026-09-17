@@ -158,7 +158,9 @@ bundle built elsewhere still starts.
 | `data/models/manifest.json` | role, tier, source, path, size, sha256 |
 | `data/models/https/` | weights fetched over HTTPS rather than the registry |
 | `data/lancedb/` | the corpus, chunked and embedded |
-| `data/sessions/<id>.json` | every turn made under a session id: question, answer, citations, kind, and a small preview of a photo; delete the file to forget the chat |
+| `data/sessions/<id>.json` | every turn made under a session id: query, answer, citations, kind, the messages the model saw, and a small preview of a photo; delete the file to forget the chat |
+| `~/.qvac/kv-cache/meridian-<id>/` | the SDK's KV state for a session, one file; kept for the newest five sessions, deleted when older ones start (`MERIDIAN_CACHED_SESSIONS`) |
+| `data/traces/<run>/<requestId>.json` | only for requests with an `x-eval-run` header: hits, messages, tool rounds, stats for the eval harness |
 | `data/serve.pid` | the running server's PID |
 
 Nothing else. Logs carry request metadata only: prompts and corpus text
