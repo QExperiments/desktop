@@ -127,9 +127,11 @@ export const answer = async (runtime, { messages, session, shown = [], onDelta, 
         const tool = toolByName[call.name]
         tries[call.name] = (tries[call.name] ?? 0) + 1
         const t0 = Date.now()
+        // A handler that throws becomes an error the model can read; the
+        // request itself never fails on a tool.
         const result = !tool ? { error: `unknown tool ${call.name}` }
           : tries[call.name] > tool.maxTries ? { error: `${call.name} was already called for this question; use its earlier result` }
-          : await call.invoke()
+          : await Promise.resolve().then(() => call.invoke()).catch((error) => ({ error: `${call.name} failed: ${error?.message ?? error}` }))
         entry.toolCalls.push({ name: call.name, args: call.arguments ?? null, ms: Date.now() - t0, ...(result?.error ? { error: String(result.error) } : {}) })
         push({ role: 'tool', content: afterTool(result) })
         const cite = toolCitation[call.name]
