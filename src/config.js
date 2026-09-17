@@ -23,6 +23,7 @@ export const config = {
   modelsDir: abs('data/models'),
   manifestPath: abs('data/models/manifest.json'),
   pidPath: abs('data/serve.pid'),
+  sessionsDir: abs('data/sessions'),
   importDir: process.env.MERIDIAN_MODELS_DIR ?? '',
   tierOverride: process.env.MERIDIAN_TIER?.toUpperCase() ?? '',
   logContent: process.env.LOG_CONTENT === '1',

@@ -8,7 +8,8 @@ const SYSTEM = [
   'You are Meridian Components\' internal assistant.',
   'Answer in the language of the question, in at most three sentences.',
   'If you do not have the answer, say so plainly instead of guessing a number.',
-  'Call lookup_stock for stock, availability or lead time; call list_documents to list the corpus files.',
+  'Tools: lookup_stock for stock, availability or lead time; list_documents for the list of corpus files.',
+  'Call a tool, read its result, then answer the user in plain text. Repeat a call only with different arguments.',
   // Qwen3 and Qwen3.5 read this as "skip the reasoning block". Models that do
   // not recognise it ignore it, and captureThinking catches them instead.
   '/no_think',
@@ -16,8 +17,14 @@ const SYSTEM = [
 
 // How many retrieved chunks are fed into the prompt as context.
 const CHAT_TOPK = 3
-// How many tool rounds one question may take before the model must answer.
+// Hard stop for the tool loop, whatever the per-tool limits add up to.
 const MAX_TOOL_ROUNDS = 3
+
+// Every tool result goes back with this line. A small model otherwise reads
+// the result as a cue to call the tool again instead of writing the answer.
+const afterTool = (result) => `${JSON.stringify(result)}\nNow answer the user in plain text from this result.`
+
+const toolByName = Object.fromEntries(tools.map((tool) => [tool.name, tool]))
 
 // Builds a system-style context block from the retrieved chunks so the model
 // grounds its answer in them instead of inventing facts.
@@ -60,12 +67,16 @@ export const answer = async (runtime, { question, prior = [], session, onDelta, 
   // Agent loop: each round is one completion. A round that asks for tools gets
   // their results appended as `tool` messages and the next round starts; the
   // loop ends on the first round with no tool calls or at MAX_TOOL_ROUNDS.
+  // Each tool allows maxTries calls per question; past that the model gets an
+  // error instead of a result. Tools stay declared in every round: without
+  // them the model still writes tool-call markup, which then streams as text.
+  const tries = {}
   for (let round = 0; ; round++) {
     const { run, settle } = await runtime.completion({
       history,
       tools,
       kvCache,
-      // Reasoning models wrap their scratchpad in  think>. Captured separately it
+      // Reasoning models wrap their scratchpad in <think>. Captured separately it
       // stays out of contentText, so it is never read aloud or shown as an answer.
       captureThinking: true,
       generationParams: { temp: 0.2, predict: 320, ...params.generationParams },
@@ -83,8 +94,12 @@ export const answer = async (runtime, { question, prior = [], session, onDelta, 
 
       history.push({ role: 'assistant', content: final.raw?.fullText ?? '' })
       for (const call of calls) {
-        const result = call.invoke ? await call.invoke() : { error: `unknown tool ${call.name}` }
-        history.push({ role: 'tool', content: JSON.stringify(result) })
+        const tool = toolByName[call.name]
+        tries[call.name] = (tries[call.name] ?? 0) + 1
+        const result = !tool ? { error: `unknown tool ${call.name}` }
+          : tries[call.name] > tool.maxTries ? { error: `${call.name} was already called for this question; use its earlier result` }
+          : await call.invoke()
+        history.push({ role: 'tool', content: afterTool(result) })
         const cite = toolCitation[call.name]
         if (cite && !citations.some((c) => c.file === cite.file)) citations.push(cite)
       }

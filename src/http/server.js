@@ -4,6 +4,7 @@ import Fastify from 'fastify'
 import { answer } from '../chat/answer.js'
 import { config } from '../config.js'
 import { registerMedia } from './media.js'
+import { createSessions } from './sessions.js'
 import { registerUi } from './ui.js'
 
 const openaiError = (reply, code, message, type) =>
@@ -12,10 +13,11 @@ const openaiError = (reply, code, message, type) =>
 export const createServer = (runtime) => {
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } })
   const api = config.apiPrefix
+  const sessions = createSessions(config.sessionsDir)
 
   app.register(multipart, { limits: { fileSize: 32 * 1024 * 1024 } })
   app.register(async (scope) => registerUi(scope, runtime))
-  app.register(async (scope) => registerMedia(scope, runtime))
+  app.register(async (scope) => registerMedia(scope, runtime, sessions))
 
   app.get(`${api}/models`, (_request, reply) => {
     const state = runtime.snapshot()
@@ -29,6 +31,11 @@ export const createServer = (runtime) => {
 
   app.get('/health', () => runtime.snapshot())
 
+  // Earlier chats, for the chat page. Text, voice and image turns all land here.
+  app.get(`${api}/sessions`, () => sessions.list())
+  app.get(`${api}/sessions/:id`, async (request, reply) =>
+    (await sessions.get(request.params.id)) ?? openaiError(reply, 404, `no session ${request.params.id}`, 'not_found'))
+
   app.post(`${api}/cancel/:requestId`, async (request, reply) => {
     const entry = await runtime.cancel(request.params.requestId)
     if (!entry) return openaiError(reply, 404, `no in-flight request ${request.params.requestId}`, 'not_found')
@@ -41,14 +48,18 @@ export const createServer = (runtime) => {
     if (typeof question !== 'string' || question.trim() === '') {
       return openaiError(reply, 400, 'messages must end with a user message carrying text content', 'invalid_request_error')
     }
-    // Earlier turns give the model the conversation; the last six keep a long
-    // chat inside the context window. A session key (OpenAI's `user` field or
-    // an x-session-id header) lets the SDK keep the KV state between calls.
+    // Earlier turns go to the model as the client sent them; the chat model's
+    // ctx_size (4096 in models.json) is the only bound. A session key (OpenAI's
+    // `user` field or an x-session-id header) lets the SDK keep the KV state
+    // between calls.
     const lastUser = messages.findLastIndex((message) => message?.role === 'user')
     const prior = messages.slice(0, lastUser)
       .filter((message) => (message?.role === 'user' || message?.role === 'assistant') && typeof message.content === 'string')
-      .slice(-6)
-    const session = typeof request.body?.user === 'string' ? request.body.user : request.headers['x-session-id']
+    const header = request.headers['x-session-id']
+    const session = typeof request.body?.user === 'string' ? request.body.user : Array.isArray(header) ? header[0] : header
+    const remember = (text, citations) => {
+      if (session) sessions.append(session, { kind: 'text', question, answer: text, citations }).catch((error) => request.log.warn(error))
+    }
 
     const generationParams = {}
 
@@ -67,7 +78,7 @@ export const createServer = (runtime) => {
         send({ id, object: 'chat.completion.chunk', created, model: config.chatModel, choices: [{ index: 0, delta, finish_reason }], ...extra })
       try {
         let first = true
-        const { citations } = await answer(runtime, {
+        const { text, citations } = await answer(runtime, {
           question,
           prior,
           session,
@@ -79,7 +90,13 @@ export const createServer = (runtime) => {
             chunk({ content })
           },
         })
+        // Nothing streamed (the model wrote no prose) but answer() still has text.
+        if (first && text) {
+          chunk({ role: 'assistant' })
+          chunk({ content: text })
+        }
         chunk({ citations }, 'stop', { grounded: citations.length > 0 })
+        remember(text, citations)
       } catch (error) {
         request.log.error(error)
         send({ error: { message: error.message, type: 'server_error' } })
@@ -90,6 +107,7 @@ export const createServer = (runtime) => {
     }
 
     const { text, citations } = await answer(runtime, { question, prior, session, generationParams })
+    remember(text, citations)
 
     return {
       id,

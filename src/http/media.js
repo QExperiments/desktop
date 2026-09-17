@@ -23,7 +23,7 @@ const withUpload = async (upload, use) => {
 
 const field = (upload, name, fallback) => upload.fields?.[name]?.value ?? fallback
 
-export const registerMedia = (app, runtime) => {
+export const registerMedia = (app, runtime, sessions) => {
   const api = config.apiPrefix
 
   const upload = async (request, reply) => {
@@ -53,12 +53,19 @@ export const registerMedia = (app, runtime) => {
   app.post(`${api}/audio/ask`, async (request, reply) => {
     const part = await upload(request, reply)
     if (!part) return reply
+    // Multipart fields must precede the file to be readable here.
     const language = field(part, 'language', 'en')
+    const session = field(part, 'session', '')
     const question = String(await withUpload(part, (path) => runtime.transcribe(path))).trim()
-    const spoken = await answer(runtime, { question })
+    if (!question) return reply.code(400).send({ error: { message: 'no speech recognised in the recording', type: 'invalid_request_error' } })
+    // No client history on this route: earlier turns of the session come from the store.
+    const prior = session ? await sessions.history(session) : []
+    const spoken = await answer(runtime, { question, prior, session: session || undefined })
     const pcm = await runtime.speak(spoken.text, { language })
+    if (session) await sessions.append(session, { kind: 'voice', question, answer: spoken.text, citations: spoken.citations })
 
     return {
+      session: session || null,
       question,
       answer: spoken.text,
       citations: spoken.citations,
@@ -71,7 +78,18 @@ export const registerMedia = (app, runtime) => {
     const part = await upload(request, reply)
     if (!part) return reply
     const question = field(part, 'question', 'Describe this image in one sentence.')
-    const text = await withUpload(part, (path) => runtime.look({ prompt: question, imagePath: path }))
-    return { question, answer: String(text).trim() }
+    const session = field(part, 'session', '')
+    // A small preview the chat page made, so an earlier chat can show the photo again.
+    const thumb = field(part, 'thumb', '')
+    // Qwen3.5 thinks before it answers; captured separately, the scratchpad stays out of the reply.
+    const text = await withUpload(part, (path) => runtime.look({ prompt: question, imagePath: path, captureThinking: true }))
+    const answer = String(text).trim()
+    if (session) {
+      await sessions.append(session, {
+        kind: 'image', question, answer, citations: [],
+        ...(thumb.startsWith('data:image/') && thumb.length <= 200_000 ? { thumb } : {}),
+      })
+    }
+    return { session: session || null, question, answer }
   })
 }

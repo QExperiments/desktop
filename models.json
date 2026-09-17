@@ -147,7 +147,8 @@
       "modelType": "llamacpp-completion",
       "required": false,
       "resident": false,
-      "note": "paired with visionProjection; loaded on demand and unloaded after the answer",
+      "note": "paired with visionProjection; loaded on demand and unloaded after the answer. The image alone takes ~600 tokens of context, so the SDK default of 1024 left ~400 for thinking plus answer and Qwen3.5 stopped mid-thought with an empty reply.",
+      "modelConfig": { "ctx_size": 4096 },
       "models": {
         "S": {
           "constant": "SMOLVLM2_500M_MULTIMODAL_Q8_0",

@@ -3,10 +3,13 @@ import { DATA_AS_OF, lookupStock } from '../../vendor/stock-tool/src/index.js'
 import { listIndexedHashes } from '../rag/store.mjs'
 
 // Tools the chat model may call. Zod schemas go to the SDK, which hands the
-// model a JSON schema and validates the arguments it sends back.
+// model a JSON schema and validates the arguments it sends back. maxTries is
+// ours: how many calls one question may make to the tool before the loop in
+// answer.js stops running it and tells the model to answer from what it has.
 export const tools = [
   {
     name: 'list_documents',
+    maxTries: 1,
     description:
       'List every file in the document corpus, as paths relative to the corpus root. ' +
       'Call this whenever the user asks which documents, files or sources exist; retrieved passages are never the full list.',
@@ -15,6 +18,7 @@ export const tools = [
   },
   {
     name: 'lookup_stock',
+    maxTries: 2, // a second call with other arguments (another region, the exact SKU) is legitimate
     description:
       `Meridian inventory as of ${DATA_AS_OF}: on-hand, allocated, available units, lead time and status per SKU and region. ` +
       'Returns structured records only. An unknown SKU returns no matches plus suggestions; never invent stock or prices.',

@@ -120,6 +120,10 @@
         min-height: 2.4rem;
         margin: 0.85rem 0 0;
       }
+      .turn + .turn { margin-top: 0.8rem; }
+      .turn b { display: block; font-size: 0.75rem; font-weight: 650; color: var(--muted); margin-bottom: 0.1rem; }
+      .cites { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.4rem; }
+      .cites code { font-size: 0.75rem; background: #fff; border: 1px solid #e4dccb; border-radius: 999px; padding: 0.1rem 0.55rem; }
       audio { width: 100%; margin-top: 0.5rem; }
       .hint { font-size: 0.85rem; margin: 0 0 0.6rem; }
     </style>
@@ -151,6 +155,7 @@
       <label for="chat-q">Question</label>
       <textarea id="chat-q">In one sentence, what is a torque wrench?</textarea>
       <button type="button" id="chat-go">Send</button>
+      <button type="button" id="chat-new">New chat</button>
       <div class="out" id="chat-out"></div>
     </section>
 
@@ -285,20 +290,90 @@
         paint(await response.json())
       })
 
+      // The transcript lives in the page and is sent whole, OpenAI style. The
+      // session id lets the server reuse its KV state between turns.
+      const newSession = () => `ui-${Date.now().toString(36)}`
+      let chat = { session: newSession(), history: [] }
+      const paintChat = (error) => {
+        const out = $('chat-out')
+        out.replaceChildren()
+        for (const { role, content, citations } of chat.history) {
+          const turn = document.createElement('div')
+          turn.className = 'turn'
+          const who = document.createElement('b')
+          who.textContent = role === 'user' ? 'You' : 'Assistant'
+          const text = document.createElement('span')
+          text.textContent = content || '…'
+          turn.append(who, text)
+          if (citations?.length) {
+            const row = document.createElement('div')
+            row.className = 'cites'
+            for (const cite of citations) {
+              const chip = document.createElement('code')
+              chip.textContent = cite.asOf ? `${cite.file} · as of ${cite.asOf}` : cite.file
+              row.append(chip)
+            }
+            turn.append(row)
+          }
+          out.append(turn)
+        }
+        if (error) out.append(Object.assign(document.createElement('div'), { className: 'turn', textContent: `Error: ${error}` }))
+        out.scrollTop = out.scrollHeight
+      }
+
+      // OpenAI-style SSE: one JSON per `data:` line, `[DONE]` closes the stream.
+      async function* sse(response) {
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+        for (;;) {
+          const { value, done } = await reader.read()
+          if (done) return
+          buffer += decoder.decode(value, { stream: true })
+          const parts = buffer.split('\n\n')
+          buffer = parts.pop()
+          for (const part of parts) {
+            const data = part.replace(/^data: /, '')
+            if (data === '[DONE]') return
+            yield JSON.parse(data)
+          }
+        }
+      }
+
+      $('chat-new').addEventListener('click', () => {
+        chat = { session: newSession(), history: [] }
+        paintChat()
+      })
+      $('chat-q').addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) $('chat-go').click()
+      })
       $('chat-go').addEventListener('click', async () => {
+        const content = $('chat-q').value.trim()
+        if (!content) return
         $('chat-go').disabled = true
-        show('chat-out', '…')
+        const messages = [...chat.history, { role: 'user', content }].map(({ role, content }) => ({ role, content }))
+        const reply = { role: 'assistant', content: '', citations: [] }
+        chat.history.push({ role: 'user', content }, reply)
+        $('chat-q').value = ''
+        paintChat()
         try {
           const response = await fetch(`${api}/chat/completions`, {
             method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ messages: [{ role: 'user', content: $('chat-q').value }] }),
+            headers: { 'content-type': 'application/json', 'x-session-id': chat.session },
+            body: JSON.stringify({ messages, stream: true }),
           })
           if (!response.ok) await fail(response)
-          const json = await response.json()
-          show('chat-out', json.choices?.[0]?.message?.content ?? json)
+          for await (const event of sse(response)) {
+            if (event.error) throw new Error(event.error.message)
+            const delta = event.choices?.[0]?.delta ?? {}
+            if (delta.content) reply.content += delta.content
+            if (delta.citations) reply.citations = delta.citations
+            paintChat()
+          }
         } catch (error) {
-          show('chat-out', error.message)
+          chat.history.splice(-2) // the question goes back to the box to resend
+          $('chat-q').value = content
+          paintChat(error.message)
         } finally {
           $('chat-go').disabled = false
         }

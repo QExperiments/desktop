@@ -116,8 +116,10 @@ npm run serve:stop
 ```
 
 `npm run serve` binds the host and port from `qvac-eval.json`. Set `PORT`
-to run beside something already on 11434. `GET /` is an EJS test console
-for chat, speech, transcription, the hands-free loop and images.
+to run beside something already on 11434. `GET /` is the chat page:
+typed, dictated or spoken questions, a spoken answer on request, a photo
+with a question, and the earlier chats listed on the left. `GET /ui` is
+the test console that exercises each API on its own.
 `GET /v1/models` answers 503 while weights load and 200 once the runtime
 can serve, which is the readiness signal the eval harness polls.
 
@@ -155,6 +157,8 @@ bundle built elsewhere still starts.
 | a private temp file | an uploaded recording or photo, deleted as soon as it is read |
 | `data/models/manifest.json` | role, tier, source, path, size, sha256 |
 | `data/models/https/` | weights fetched over HTTPS rather than the registry |
+| `data/lancedb/` | the corpus, chunked and embedded |
+| `data/sessions/<id>.json` | every turn made under a session id: question, answer, citations, kind, and a small preview of a photo; delete the file to forget the chat |
 | `data/serve.pid` | the running server's PID |
 
 Nothing else. Logs carry request metadata only: prompts and corpus text
@@ -185,7 +189,7 @@ P2P live checks (two processes, real DHT) are not in CI. Walk through
 | `src/p2p/provider.js` | `npm run provide` on the strong box; optional public-key firewall |
 | `docs/p2p-test.md` | how to test firewall, heartbeat, failover |
 | `src/http/` | OpenAI-compatible surface; talks to the runtime, never the SDK |
-| `views/` | EJS test console at `GET /` |
+| `views/` | chat page at `GET /`, test console at `GET /ui` |
 | `src/chat/answer.js` | the one seam a question passes through to become an answer |
 | `src/audio/wav.js` | PCM in and out of the RIFF container every client expects |
 | `scripts/models-fetch.js` | provisioning, the one step that uses the network |
