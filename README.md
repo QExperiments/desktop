@@ -11,19 +11,18 @@ Tether. The client, Meridian Components, is fictional.
 
 ## What works today
 
-This branch covers Req #1, the model runtime, Req #4, voice and vision,
-and Req #5.1, P2P delegation. It provisions weights, picks a tier
-for the machine, loads and unloads models, cancels work in flight,
-transcribes speech, speaks answers back, answers questions about a
-photograph, and can run chat, ASR and TTS on a Meridian provider peer.
-Retrieval, citations and tools arrive in later stages; see
-[ARCHITECTURE.md](ARCHITECTURE.md) for the plan and
+Retrieval, citations, streaming and tools are in. `npm run corpus:ingest`
+chunks and embeds the corpus into LanceDB; `POST /v1/chat/completions`
+retrieves, grounds the answer, cites the files, streams with
+`stream: true`, and lets the model call `list_documents` and the shipped
+`lookup_stock` tool. Tool calls need tier M or larger (the 2019-laptop
+tier in [ARCHITECTURE.md](ARCHITECTURE.md) D7); tier S answers from the
+corpus only. The runtime provisions weights, picks a tier for the
+machine, loads and unloads models, cancels work in flight, transcribes
+speech, speaks answers back, answers questions about a photograph, and
+can run chat, ASR and TTS on a Meridian provider peer. See
 [docs/decisions.md](docs/decisions.md) for why things are the way they
 are.
-
-`POST /v1/chat/completions` answers **501** on purpose. Req 6.1.1 requires
-that route to run retrieval and tools, and a placeholder proxy is the
-shortcut that ends up shipping.
 
 ## Voice and vision
 
@@ -51,9 +50,9 @@ curl -X POST http://127.0.0.1:11434/v1/images/ask \
   -F 'question=What is the part number?' -F file=@nameplate.png
 ```
 
-The answers the loop speaks are not grounded in the corpus yet: retrieval
-lands in the next stage, and every answer already carries the `citations`
-array it will fill.
+The answers the loop speaks are grounded in whatever `npm run corpus:ingest`
+indexed: the top chunks go into the prompt and the `citations` array names
+their files, relative to the corpus root.
 
 Languages are detected rather than declared. Transcription quality
 depends on the tier: whisper-tiny on S, whisper-base on M.
@@ -96,7 +95,9 @@ of disk for the smallest tier, 2 GB for the fleet tier.
 ```bash
 npm ci
 npm run models:fetch     # needs the network
-npm run serve            # does not
+unzip corpus.zip -d data/
+npm run corpus:ingest    # embeds data/corpus into data/lancedb, ~10 s
+npm run serve            # does not need the network
 curl http://127.0.0.1:11434/v1/models
 npm run serve:stop
 ```
@@ -145,6 +146,13 @@ bundle built elsewhere still starts.
 
 Nothing else. Logs carry request metadata only: prompts and corpus text
 are never logged. `serve` opens no outbound connection.
+
+## Build
+
+```bash
+npm run build        # plugin-scoped worker bundle in qvac/, app bundle in dist/
+npm run build:full   # also the full-SDK bundle, and writes docs/bundle-size.md
+```
 
 ## Tests
 

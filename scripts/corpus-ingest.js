@@ -1,3 +1,12 @@
-// Stage 2 (issues N-02, M-03) replaces this with the real ingest pipeline.
-// It exits 0 so the qvac-eval.json `setup` command already works end to end.
-console.log('corpus:ingest: no corpus pipeline in this stage, nothing to do')
+import { existsSync } from 'node:fs'
+import { ingest } from '../src/rag/ingest.mjs'
+import { config } from '../src/rag/store.mjs'
+
+// qvac-eval.json runs this in `setup`. The corpus is expected unpacked at
+// data/corpus, so `unzip corpus.zip -d data/` is the one step before it.
+if (!existsSync(config.corpusDir)) {
+  console.error(`corpus:ingest: ${config.corpusDir} not found — run: unzip corpus.zip -d data/`)
+  process.exit(1)
+}
+
+await ingest({ force: process.argv.includes('--force') })

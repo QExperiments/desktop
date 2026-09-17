@@ -19,10 +19,11 @@ export const config = {
   tableName: process.env.LANCE_TABLE || 'meridian_corpus',
   embeddingModelId: process.env.EMBEDDING_MODEL || 'EMBEDDINGGEMMA_300M_Q8_0',
   chunkOpts: {
-    chunkSize: Number(process.env.CHUNK_SIZE || 1024),
+    chunkSize: Number(process.env.CHUNK_SIZE || 512),
     chunkOverlap: Number(process.env.CHUNK_OVERLAP || 64),
     chunkStrategy: process.env.CHUNK_STRATEGY || 'paragraph',
-    splitStrategy: process.env.CHUNK_SPLIT || 'sentence',
+    // 'sentence' never splits in SDK 0.18.2: a 4 400-char report came back as one chunk.
+    splitStrategy: process.env.CHUNK_SPLIT || 'token',
   },
   topK: Number(process.env.TOP_K || 5),
   addBatchSize: Number(process.env.ADD_BATCH_SIZE || 128),
