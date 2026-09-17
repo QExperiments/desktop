@@ -51,9 +51,9 @@ curl -X POST http://127.0.0.1:11434/v1/images/ask \
   -F 'question=What is the part number?' -F file=@nameplate.png
 ```
 
-The answers the loop speaks are not grounded in the corpus yet: retrieval
-lands in the next stage, and every answer already carries the `citations`
-array it will fill.
+The answers the loop speaks are grounded in whatever `npm run corpus:ingest`
+indexed: the top chunks go into the prompt and the `citations` array names
+their files, relative to the corpus root.
 
 Languages are detected rather than declared. Transcription quality
 depends on the tier: whisper-tiny on S, whisper-base on M.
@@ -96,7 +96,9 @@ of disk for the smallest tier, 2 GB for the fleet tier.
 ```bash
 npm ci
 npm run models:fetch     # needs the network
-npm run serve            # does not
+unzip corpus.zip -d data/
+npm run corpus:ingest    # embeds data/corpus into data/lancedb, ~10 s
+npm run serve            # does not need the network
 curl http://127.0.0.1:11434/v1/models
 npm run serve:stop
 ```
