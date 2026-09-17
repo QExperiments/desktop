@@ -150,6 +150,7 @@
       <label for="chat-q">Question</label>
       <textarea id="chat-q">In one sentence, what is a torque wrench?</textarea>
       <button type="button" id="chat-go">Send</button>
+      <button type="button" id="chat-new">New chat</button>
       <div class="out" id="chat-out"></div>
     </section>
 
@@ -283,20 +284,47 @@
         paint(await response.json())
       })
 
+      // The transcript lives in the page and is sent whole, OpenAI style. The
+      // session id lets the server reuse its KV state between turns.
+      const newSession = () => `ui-${Date.now().toString(36)}`
+      let chat = { session: newSession(), history: [] }
+      const paintChat = (pending) => {
+        const lines = chat.history.map(({ role, content, citations }) =>
+          `${role === 'user' ? 'You' : 'Assistant'}: ${content}` +
+          (citations?.length ? `\n  [${citations.map((c) => c.file).join(', ')}]` : ''))
+        if (pending) lines.push('Assistant: …')
+        show('chat-out', lines.join('\n\n'))
+      }
+
+      $('chat-new').addEventListener('click', () => {
+        chat = { session: newSession(), history: [] }
+        paintChat()
+      })
+      $('chat-q').addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) $('chat-go').click()
+      })
       $('chat-go').addEventListener('click', async () => {
+        const content = $('chat-q').value.trim()
+        if (!content) return
         $('chat-go').disabled = true
-        show('chat-out', '…')
+        chat.history.push({ role: 'user', content })
+        $('chat-q').value = ''
+        paintChat(true)
         try {
           const response = await fetch(`${api}/chat/completions`, {
             method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ messages: [{ role: 'user', content: $('chat-q').value }] }),
+            headers: { 'content-type': 'application/json', 'x-session-id': chat.session },
+            body: JSON.stringify({ messages: chat.history.map(({ role, content }) => ({ role, content })) }),
           })
           if (!response.ok) await fail(response)
-          const json = await response.json()
-          show('chat-out', json.choices?.[0]?.message?.content ?? json)
+          const message = (await response.json()).choices?.[0]?.message
+          chat.history.push({ role: 'assistant', content: message?.content ?? '', citations: message?.citations })
+          paintChat()
         } catch (error) {
-          show('chat-out', error.message)
+          chat.history.pop() // the question goes back to the box to resend
+          $('chat-q').value = content
+          paintChat()
+          $('chat-out').textContent += `\n\nError: ${error.message}`
         } finally {
           $('chat-go').disabled = false
         }
