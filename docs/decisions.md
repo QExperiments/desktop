@@ -128,3 +128,31 @@ fit; the first live call overflowed 1024 with whole-document chunks.
 answers OpenAI SSE chunks, citations and `grounded` on the last one (req
 2.4). Tools are not yet in the loop (req 3); until they are, 6.1.1 is met
 for retrieval and grounding only.
+
+## ADR-009 — Tools ride next to the retrieved context; tier S is chat-only
+
+**Context.** Req 3 wants `list_documents` and the shipped stock tool
+behind Zod schemas, driven by structured tool-call events. Two findings
+while wiring it. First, the llamacpp plugin only renders tools into the
+prompt when the model is loaded with `modelConfig.tools: true`; without
+it the model never sees them and talks *about* the tool instead. Second,
+with retrieved context in the prompt, Qwen3-0.6B (tier S) never calls
+`lookup_stock` in any of six prompt layouts tried, while Qwen3.5-2B
+(tier M) calls the right tool with the right SKU in 6 of 6 questions,
+English and Russian, with context in the system prompt. Layouts that
+keep the system prompt constant (context in the user turn, or retrieval
+as a prior tool call) cost tier M the `list_documents` calls.
+
+**Decision.** Keep the context in the system prompt. The chat role loads
+with `tools: true`. `answer()` runs the loop: one completion per round,
+tool results appended as `tool` messages, at most three rounds. Tool
+facts are cited as `{ file: "stock-tool", asOf }`, as the tool's README
+asks. `vendor/stock-tool` is the zip as shipped; `node verify.mjs` there
+must keep passing.
+
+**Consequences.** Tools work from tier M up, which is the tier D7 names
+for the 2019 laptop. Tier S answers from the corpus and says when it
+cannot answer; it does not reach the stock tool. Because the system
+prompt changes with every question, the SDK's KV cache (keyed on system
+prompt + tools) cannot carry a prefix between questions; req 6.3 has to
+live with that or change the layout.
