@@ -68,7 +68,7 @@ export const answer = async (runtime, { messages, session, shown = [], onDelta, 
   let hits = []
   if (query) {
     try {
-      const results = await search(query, CHAT_TOPK)
+      const results = await search(query, CHAT_TOPK, { embed: runtime.embed })
       hits = results.slice(0, CHAT_TOPK).map((r) => {
         const id = `${r.file}::${r.chunkIndex}`
         return { id, file: r.file, chunkIndex: r.chunkIndex, score: r.score, content: r.content, reused: seen.has(id) }

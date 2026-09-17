@@ -28,9 +28,11 @@ export async function releaseModel() {
 }
 
 // Embeds the query and runs hybrid search, dropping results without a usable score.
-export async function search(queryText, topK = config.topK) {
-  const modelId = await ensureModel()
-  const { embedding } = await embed({ modelId, text: queryText })
+// `embed`, when given, is the caller's embedder (the server's runtime already
+// holds EmbeddingGemma, so loading a second copy here would double 0.33 GB);
+// without it this module loads its own, which the CLI ingest and eval use.
+export async function search(queryText, topK = config.topK, { embed: embedWith } = {}) {
+  const { embedding } = embedWith ? await embedWith(queryText) : await embed({ modelId: await ensureModel(), text: queryText })
   const results = await query(queryText, embedding, topK)
   return results.filter((r) => r.score !== undefined)
 }
