@@ -147,6 +147,13 @@ bundle built elsewhere still starts.
 Nothing else. Logs carry request metadata only: prompts and corpus text
 are never logged. `serve` opens no outbound connection.
 
+## Build
+
+```bash
+npm run build        # plugin-scoped worker bundle in qvac/, app bundle in dist/
+npm run build:full   # also the full-SDK bundle, and writes docs/bundle-size.md
+```
+
 ## Tests
 
 ```bash

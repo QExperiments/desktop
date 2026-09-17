@@ -16,8 +16,8 @@
     "test": "node --test 'test/unit/**/*.test.js'",
     "test:e2e": "node --test --test-timeout=1800000 'test/e2e/**/*.test.js'",
     "eval": "node scripts/stub.js eval",
-    "build": "node scripts/stub.js build",
-    "build:full": "node scripts/stub.js build:full"
+    "build": "node scripts/build.js",
+    "build:full": "node scripts/build.js --full"
   },
   "repository": {
     "type": "git",
@@ -36,5 +36,8 @@
     "ejs": "^6.0.1",
     "fastify": "^5.12.4",
     "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
   }
 }
