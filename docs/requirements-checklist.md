@@ -1,8 +1,10 @@
 # Requirements checklist
 
 Source: `context/qvac-challenge-requirements.md`. State verified against
-`origin/develop` at commit `7f4f5f0` on 2026-09-17, after PR #22 merged the
-M-3 ingestion and RAG work.
+branch `N-8-wire-corpus-ingest` at commit `449b35b` on 2026-09-17, which sits
+on `origin/develop` `7f4f5f0` (PR #22, the M-3 ingestion and RAG work) and adds
+the corpus path, the open chat route, streaming, tools, the bundle and the
+session KV cache.
 
 `[x]` shipped and exercised by a test or a live check · `[~]` partially there,
 the gap is named · `[ ]` not started.
@@ -16,8 +18,9 @@ that are not code.
 
 - [x] **1.1** Inference, embeddings and retrieval on-device or on a
   Meridian-controlled peer, no cloud AI APIs.
-  *Only `src/runtime/` and `src/p2p/` import the SDK; `serve` opens no outbound
-  connection. Retrieval itself does not exist yet — see Req #2.*
+  *`serve` opens no outbound connection; retrieval, embeddings and the stock
+  tool all run in-process. `src/rag/` imports the SDK directly, against D3 —
+  see the note under Req #2.*
 - [x] **1.2** Model discovery and download from at least two sources.
   *Three: `--source registry` (QVAC registry), `--source https` (HuggingFace
   mirror, resumable), `--source fs --from-dir` (MDM-provisioned directory).
@@ -37,21 +40,23 @@ that are not code.
 
 ## Req #2 — Showing a wrong number to a customer is unacceptable
 
-- [~] **2.1** Ingest `corpus.zip` as given.
-  *The pipeline exists — `src/rag/ingest.mjs` walks the corpus, parses per file
-  type and chunks with `ragChunk()`. **Nothing calls it.** `ingest()` is
-  exported and has no caller anywhere in `src/`, `scripts/` or `test/`, while
-  `npm run corpus:ingest` still runs the same three-line stub that prints
-  "nothing to do" and exits 0. `qvac-eval.json` declares that script in `setup`,
-  so the harness would set up an empty store and never notice.*
-- [~] **2.2** RAG over the private corpus with QVAC embeddings, answers carry
+- [x] **2.1** Ingest `corpus.zip` as given.
+  *`unzip corpus.zip -d data/` then `npm run corpus:ingest`, which now calls
+  `ingest()` from `src/rag/ingest.mjs`. Against the shipped zip: 32 files found,
+  30 indexed (the two `pictures/` are for the VLM path), 34 chunks; a second run
+  skips all 30 by content hash. Two SDK findings on the way: `splitStrategy:
+  'sentence'` never splits, so `'token'` is the default now, and `chunkSize` is
+  in tokens, so 512 keeps three chunks inside the chat context.*
+- [x] **2.2** RAG over the private corpus with QVAC embeddings, answers carry
   citations to the source document.
-  *Wired end to end in `src/chat/answer.js`: every question runs `search()`,
-  the top 3 chunks go into the system prompt as a context block with an explicit
-  "do not invent facts beyond it", and `citations` is filled with
-  `{ file, score }`. Retrieval failure degrades to a plain answer instead of
-  failing the request. **Never run against a corpus and not covered by a single
-  test**, so it is code-complete and unverified.*
+  *`src/chat/answer.js`: every question runs `search()`, the top chunks go into
+  the system prompt with "do not invent facts beyond it", `citations` carries
+  `{ file, score }`. Verified live against the corpus: ServoDrive X4 list price
+  $48,500, P2 SLA 8 hours, P1 SLA 4 hours, each with the right files cited; a
+  question the corpus cannot answer gets "not mentioned in the provided
+  context". Two loose ends: no unit test touches `src/rag/` (the recall harness
+  in `retrieve.mjs` is ready for one), and `grounded` is true whenever retrieval
+  returned anything, even for that unanswerable question.*
 - [x] **2.3** Persist embeddings to a local vector store, schema matched to the
   embedding model's dimensionality.
   *LanceDB in `src/rag/store.mjs`, table `meridian_corpus` under `data/lancedb`.
@@ -59,13 +64,14 @@ that are not code.
   `embed()`, so the vector width comes from the embedding model itself rather
   than a hard-coded number. Search is hybrid: cosine plus a full-text index,
   the two rankings fused.*
-- [ ] **2.4** Streaming generation.
-  *The SDK stream is consumed internally (`run.events`, `contentDelta`), which
-  is how the voice loop works. Nothing is streamed to an HTTP client:
-  `stream: true` on `/v1/chat/completions` returns 501, and there is no SSE.*
+- [x] **2.4** Streaming generation.
+  *`stream: true` on `/v1/chat/completions` returns OpenAI SSE: a role chunk,
+  one chunk per token, a final chunk with `citations` and `grounded`, then
+  `[DONE]`. `answer()` forwards `contentDelta` events through an `onDelta`
+  callback; the voice loop is unchanged. Verified live, reassembled text equals
+  the non-streaming answer.*
 
-**Block status: the hard part is built, the cheap part is missing. One caller
-for `ingest()` turns three partials into a working corpus path.**
+**Block status: complete. Test debt named under 2.2.**
 
 ### Two things M-3 broke on the way in
 
@@ -79,26 +85,34 @@ for `ingest()` turns three partials into a working corpus path.**
   itself and caches its own `modelId`, while the runtime already holds `embed`
   as a resident role. With `serve` running, EmbeddingGemma is loaded twice —
   2 × 328 MB. On the 8 GB fleet laptop from constraint C4 that is the exact
-  failure this project is supposed to avoid. `ingest.mjs` additionally calls
-  `close()`, which tears down the shared Bare worker, so it can never be called
-  in-process from the server.
+  failure this project is supposed to avoid. `ingest.mjs` also calls `close()`,
+  which tears down the shared Bare worker; that is fine for `npm run
+  corpus:ingest` as its own process and rules out calling it from the server.
+  Both still stand after N-8.
 
 ---
 
 ## Req #3 — The assistant has to do things aside from chat
 
-- [ ] **3.1** Tool-capable model, tools declared with Zod schemas in the `tools`
+- [x] **3.1** Tool-capable model, tools declared with Zod schemas in the `tools`
   array on `completion()`, agent loop driven by structured tool-call events.
-  *No `tools` array and no `zod` import anywhere in `src/`. The chat model on
-  tier S (Qwen3-0.6B) is also the wrong size for a reliable tool loop; tier M
-  is `QWEN3_5_2B_MULTIMODAL_Q4_K_M`, and its tool-call quality is the open
-  question recorded in `ARCHITECTURE.md` D7.*
-  - [ ] **3.1.1** `list_documents` — returns the current corpus inventory.
-    *Depends on 2.1: there is no inventory until the corpus is ingested.*
-  - [ ] **3.1.2** Stock lookup tool from the provided `stock-tool.zip`.
-    *The zip has not been unpacked into the repo.*
+  *`src/chat/tools.js` declares both tools with Zod; `answer()` runs the loop
+  from `toolCall` events and `final.toolCalls`, appends results as `tool`
+  messages, at most three rounds. Two findings recorded in ADR-009: the
+  llamacpp plugin only renders tools when the model is loaded with
+  `modelConfig.tools: true`, and tier S (Qwen3-0.6B) never calls a tool once
+  retrieved context is present, while tier M (Qwen3.5-2B, the D7 default for
+  the 2019 laptop) calls the right tool with the right SKU in 6 of 6 probes,
+  English and Russian. Unit tests in `tools.test.js`.*
+  - [x] **3.1.1** `list_documents` — returns the current corpus inventory.
+    *Reads the index; live answer on tier M lists all 30 files by folder.*
+  - [x] **3.1.2** Stock lookup tool from the provided `stock-tool.zip`.
+    *Vendored as shipped in `vendor/stock-tool`, `verify.mjs` passes 84 checks.
+    Live on tier M: 14 units in EMEA, 6 in APAC, "no record" for an unknown
+    SKU, cited as `{ file: "stock-tool", asOf: "2026-06-30" }`.*
 
-**Block status: not started.**
+**Block status: complete from tier M up; tier S answers from the corpus only
+and says so.**
 
 ---
 
@@ -115,19 +129,18 @@ for `ingest()` turns three partials into a working corpus path.**
     *Needed a 0.9 MB Silero VAD model as a companion — whisper will not segment
     a live stream without it. e2e test `transcribes a live stream chunk by
     chunk`.*
-- [~] **4.2** Hands-free loop: spoken question → **grounded** answer → TTS.
+- [x] **4.2** Hands-free loop: spoken question → **grounded** answer → TTS.
   *`POST /v1/audio/ask` closes the loop end to end in ~1.1 s on tier S: audio
-  in, text and audio out. Grounding arrived with M-3 — the loop goes through
-  `src/chat/answer.js`, which now retrieves and cites. The bet that one seam
-  would serve both callers paid off. It stays partial for the same reason as
-  2.2: with no corpus ingested, `search()` returns nothing and the loop answers
-  ungrounded with an empty `citations`.*
+  in, text and audio out. It goes through `src/chat/answer.js`, the same seam
+  the chat route uses, so with the corpus ingested its answers are grounded and
+  cited without a change to the audio routes. The seam is verified live; the
+  audio route itself was not re-run after N-8.*
 - [x] **4.3** Image + text in one VLM context.
   *`POST /v1/images/ask`. The e2e test sends two generated PNGs and asserts the
   answers differ (`Green.` vs `Blue`), which is what proves the model looks at
   the image instead of guessing from the prompt.*
 
-**Block status: complete except grounding in 4.2, which is Req #2 work.**
+**Block status: complete.**
 
 ---
 
@@ -159,61 +172,62 @@ for `ingest()` turns three partials into a working corpus path.**
 
 ## Req #6 — They already have a chat tool, and the IT lead can break the deal
 
-- [~] **6.1** OpenAI-compatible HTTP API usable by a stock client without code
+- [x] **6.1** OpenAI-compatible HTTP API usable by a stock client without code
   changes.
   *`GET /v1/models` (503 while loading, 200 when ready), `POST
-  /v1/chat/completions`, `/v1/audio/{speech,transcriptions,ask}`,
-  `/v1/images/ask`, `POST /v1/cancel/:requestId`. The surface is there; the main
-  route does not yet run the product.*
-  - [ ] **6.1.1** `POST /v1/chat/completions` must run retrieval, grounding and
+  /v1/chat/completions` with and without `stream`, `/v1/audio/{speech,
+  transcriptions,ask}`, `/v1/images/ask`, `POST /v1/cancel/:requestId`. Every
+  check below was made with plain `curl` and an OpenAI-shaped body.*
+  - [x] **6.1.1** `POST /v1/chat/completions` must run retrieval, grounding and
     tools. A pass-through does not satisfy this.
-    *Still returns **501 by default**, gated behind `MERIDIAN_UNGROUNDED=1`.
-    **The reason recorded in ADR-004 has expired**: it refused because a
-    pass-through without retrieval would ship, and retrieval now exists on the
-    other side of `answer()`. What is left is a decision plus 2.1 — open the
-    route, ingest a corpus, and this is the item that is no longer blocked by
-    missing code. ADR-004 needs a successor entry either way.*
-  - [~] **6.1.2** Machine-readable `citations` array on the response message.
-    *Now populated from retrieval as `{ file, score }`, the exact shape §5.2
-    asks for. Unverified: `file` must be relative to the corpus root as shipped
-    in `corpus.zip`, and with nothing ingested nobody has checked that the
-    stored path matches that form.*
+    *The 501 and `MERIDIAN_UNGROUNDED` are gone (ADR-008 supersedes ADR-004).
+    The route always runs `answer()`: retrieval, grounding, the tool loop,
+    earlier turns from the client's `messages`. Verified live on tiers S and M.*
+  - [x] **6.1.2** Machine-readable `citations` array on the response message.
+    *`{ file, score }` per retrieved chunk, `{ file: "stock-tool", asOf }` for
+    tool facts. Stored paths checked against the index: `emails/001-...md`,
+    `policies/escalation-matrix.txt` — relative to the corpus root as shipped.*
   - [x] **6.1.3** Honour `temperature` and `seed`.
     *Both mapped onto `generationParams`. Verified live: two runs at
     `seed: 42, temperature: 0` returned identical text word for word.*
-  - [~] **6.1.4** Declare how to run everything in `qvac-eval.json` at the repo
+  - [x] **6.1.4** Declare how to run everything in `qvac-eval.json` at the repo
     root.
     *All nine required fields present, port 11434, `readyPath` `/models`,
-    600 s timeout, model ids `meridian-assistant` and `meridian-embed`, and
-    `start` needs no network. Downgraded from done: `setup` promises
-    `npm run corpus:ingest`, and that script is still the stub. The file now
-    declares a step the repository does not perform.*
-- [~] **6.2** Lean, plugin-scoped bundle instead of building against the full
+    600 s timeout, model ids `meridian-assistant` and `meridian-embed`, `start`
+    needs no network, and `setup` now performs the ingest it declares. One
+    assumption: the harness unpacks `corpus.zip` into `data/` before `setup`,
+    as the README instructs; the script fails with that instruction otherwise.*
+- [x] **6.2** Lean, plugin-scoped bundle instead of building against the full
   SDK.
   - [x] **6.2.1** Only the plugins actually used, via `plugins` in
     `qvac.config.*`.
     *Four declared in `qvac.config.json`: llamacpp-completion,
     llamacpp-embedding, whispercpp-transcription, tts-ggml.*
-  - [ ] **6.2.2** Produce a tree-shaken build.
-    *`npm run build` and `npm run build:full` are stubs that exit 1. Nothing is
-    built, so there is no bundle-size report either — and that report is a named
-    deliverable. For scale: `node_modules/@qvac/` is **4.5 GB** because every
-    native addon ships prebuilds for darwin-arm64/x64, linux, win32, android and
-    the iOS simulators, while the one binary this machine runs is 12.4 MB.*
-- [ ] **6.3** Reuse the KV cache across turns with a per-session key.
-  *No `kvCache` or session key anywhere in `src/`. The SDK writes to
-  `~/.qvac/kv-cache/` but nothing passes a per-session key, so multi-turn chat
-  rebuilds attention state from the whole history every question.*
+  - [x] **6.2.2** Produce a tree-shaken build.
+    *`npm run build` runs the SDK's `bundleSdk` on `qvac.config.json` for the
+    worker bundle and esbuild for our code; `npm run build:full` adds the
+    all-plugin variant and writes `docs/bundle-size.md`. Measured: worker bundle
+    11.7 → 9.6 MB, native addons 4811 → 1654 MB across all hosts and 71.5 MB for
+    one host, application code 1.1 MB. The app bundle is measured, not what
+    `npm run serve` runs: `src/config.js` resolves paths from its own location.*
+- [x] **6.3** Reuse the KV cache across turns with a per-session key.
+  *Session from the OpenAI `user` field or `x-session-id`, passed as `kvCache`;
+  earlier turns forwarded so the model has the conversation either way
+  (ADR-010). Measured on tier M: the tool loop's second round logs `REUSING
+  cache` and sends one message, 5.0 s against 6.8 s uncached; follow-ups answer
+  from memory ("repeat that in one word" → "8"). Across turns a hit needs the
+  same retrieved context, so topic changes miss. Each cache file is ~33 MB and
+  nothing deletes them yet; the two mitigations are written down in ADR-010.*
 
-**Block status: the eval contract and plugin scoping are done; the route that
-the whole submission is scored through (6.1.1) is not.**
+**Block status: complete. Open questions are operational: cache cleanup, and
+running from the bundle.**
 
 ---
 
 ## Improvements — optional, and only after the mandatory batch
 
 Grading principle from §7: *finishing beats expanding*. None of these should
-start while Req #2, #3 and 6.1.1/6.2.2/6.3 are open.
+start before the quality debt under "Where this stands" is paid.
 
 - [ ] **I.1** Resilience over P2P
   - [ ] **I.1.1** Provider firewall — allow/deny by consumer public key
@@ -241,16 +255,16 @@ start while Req #2, #3 and 6.1.1/6.2.2/6.3 are open.
 
 ### Technical
 
-- [~] Source code in a repository with a README that gets a reviewer from clone
+- [x] Source code in a repository with a README that gets a reviewer from clone
   to running against the provided corpus
-  *README covers clone → fetch → serve → curl and is accurate. "Against the
-  provided corpus" is not true yet: there is no corpus path.*
+  *Quick start is clone → `npm ci` → `models:fetch` → `unzip corpus.zip -d
+  data/` → `corpus:ingest` → `serve` → `curl`, and each step was run.*
 - [~] Technical and architectural documentation with diagrams: model lifecycle,
   data flow, P2P delegation topology
   *`ARCHITECTURE.md` and `docs/decisions.md` cover the decisions in prose. The
   three named diagrams do not exist as committed artifacts.*
-- [ ] Bundle size report: full-SDK build versus plugin-scoped build
-  *Blocked on 6.2.2 — neither build runs.*
+- [x] Bundle size report: full-SDK build versus plugin-scoped build
+  *`docs/bundle-size.md`, regenerated by `npm run build:full`.*
 - [ ] Honest overview of AI-assisted coding tools used and how they contributed
 
 ### Client-facing
@@ -286,29 +300,36 @@ start while Req #2, #3 and 6.1.1/6.2.2/6.3 are open.
 | Block | Items | Done | Partial | Open |
 |---|---|---|---|---|
 | Req #1 — on-device | 4 | 4 | 0 | 0 |
-| Req #2 — RAG and citations | 4 | 1 | 2 | 1 |
-| Req #3 — tools | 3 | 0 | 0 | 3 |
-| Req #4 — voice and vision | 5 | 4 | 1 | 0 |
+| Req #2 — RAG and citations | 4 | 4 | 0 | 0 |
+| Req #3 — tools | 3 | 3 | 0 | 0 |
+| Req #4 — voice and vision | 5 | 5 | 0 | 0 |
 | Req #5 — weak laptop | 3 | 3 | 0 | 0 |
-| Req #6 — API and footprint | 9 | 2 | 4 | 3 |
-| **Mandatory total** | **28** | **14** | **7** | **7** |
+| Req #6 — API and footprint | 9 | 9 | 0 | 0 |
+| **Mandatory total** | **28** | **28** | **0** | **0** |
 
-Two blocks are complete (#1, #5). Req #3 is the only one still untouched. The
-rest is finishing, not building.
+Every mandatory item is shipped and was exercised by a test or a live check.
+What remains is quality debt the checks exposed, then the deliverables that
+are not code.
 
-**What is left, in the order that unblocks the most:**
+**Quality debt, in the order it matters:**
 
-1. **Call `ingest()`.** Replace the stub in `scripts/corpus-ingest.js` with a
-   caller and put the corpus in place. This alone moves 2.1, 2.2, 4.2, 6.1.2 and
-   6.1.4 from partial to verifiable, because every one of them is waiting on the
-   same missing corpus rather than on missing code.
-2. **Open `/v1/chat/completions` (6.1.1).** Its stated reason has expired now
-   that retrieval exists. Needs the route ungated, a successor to ADR-004, and
-   proof that `citations[].file` is relative to the corpus root.
-3. **Put `src/rag/` back behind the runtime.** Restores D3, stops loading
-   EmbeddingGemma twice, and brings retrieval back under the cancel registry.
-4. **Test the RAG path.** Thirty-four tests pass and not one touches `src/rag/`.
-   The recall harness in `retrieve.mjs` already has the query set for it.
-5. **Tools (3.1).** The only block with nothing written.
-6. **Then 6.2.2 and 6.3** — the tree-shaken build with its size report, and the
-   per-session KV cache key.
+1. **Tier S has no tools.** The 8 GB floor answers from the corpus and says
+   when it cannot; stock questions need tier M. Either accept and state it to
+   Meridian, or find a layout that works for Qwen3-0.6B (six were tried).
+2. **`src/rag/` imports the SDK directly and loads EmbeddingGemma a second
+   time** (2 × 328 MB) — the two M-3 regressions under Req #2. Putting it
+   behind the runtime restores D3 and the cancel registry.
+3. **No unit test touches `src/rag/`.** The recall harness in `retrieve.mjs`
+   has the query set; it needs a runner and a threshold.
+4. **KV cache files accumulate** at ~33 MB per session and system prompt.
+   ADR-010 names the two fixes.
+5. **`grounded` means "retrieval returned something"**, not "the answer is
+   supported". A score threshold would make it honest.
+6. **The app bundle is measured, not run.** `npm run serve` still starts from
+   source; running from `dist/` needs path resolution that does not depend on
+   the file's location.
+
+**Not code:** the executive summary, Raj's answers, the project plan, the
+pitch, the demo video, the team sheet, the AI-tools overview, and the three
+diagrams. Raw material for Raj and the assumptions list already exists in
+`ARCHITECTURE.md`, the README's disk table and the ADRs.
