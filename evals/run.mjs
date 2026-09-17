@@ -137,6 +137,7 @@ if (liveJobs.length) {
           wall_ms: reply.wallMs, ttft_client_ms: reply.ttftClientMs, usage: reply.usage, stats: reply.stats ? { ...reply.stats, tool_calls: undefined } : null,
           hits: hits.map(({ content, ...hit }) => hit), context: excerpts, toolResults, rounds: trace?.rounds?.length ?? null,
           thinking_chars: (trace?.rounds ?? []).reduce((s, r) => s + (r.thinkingChars ?? 0), 0),
+          context_tokens: (trace?.rounds ?? []).reduce((max, r) => Math.max(max, (r.stats?.promptTokens ?? 0) + (r.stats?.cacheTokens ?? 0)), 0) || null,
           tool_calls: (trace?.rounds ?? []).flatMap((r) => r.toolCalls ?? []),
           ...text, ...tools,
         }

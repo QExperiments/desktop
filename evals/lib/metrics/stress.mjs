@@ -20,8 +20,11 @@ export const scoreStress = (rows, { ctx, predict = 320 }) => {
   const ttft = finite(ok.map((row) => row.stats?.ttft_ms))
   const tps = finite(ok.map((row) => row.stats?.tps))
   const total = finite(ok.map((row) => row.wall_ms))
-  const prompt = ok.map((row) => [row.turn, row.usage?.prompt_tokens ?? null]).filter(([, y]) => y !== null)
-  const ctxHit = rows.find((row) => (row.usage?.prompt_tokens ?? 0) >= ctx - predict || /context|overflow/i.test(row.error ?? ''))
+  // context_tokens is the largest prompt of one round (processed + cached);
+  // usage.prompt_tokens sums the rounds of a tool loop and overstates it.
+  const held = (row) => row.context_tokens ?? row.usage?.prompt_tokens ?? null
+  const prompt = ok.map((row) => [row.turn, held(row)]).filter(([, y]) => y !== null)
+  const ctxHit = rows.find((row) => (held(row) ?? 0) >= ctx - predict || /context|overflow/i.test(row.error ?? ''))
   return {
     turns: rows.length,
     error_rate: rows.length ? rows.filter((row) => row.error || row.status !== 200).length / rows.length : null,
@@ -35,7 +38,7 @@ export const scoreStress = (rows, { ctx, predict = 320 }) => {
     ttft_slope_ms_per_turn: slope(ok.map((row) => [row.turn, row.stats?.ttft_ms]).filter(([, y]) => Number.isFinite(y))),
     prompt_tokens_by_turn: prompt.map(([turn, tokens]) => ({ turn, tokens })),
     cached_tokens_by_turn: ok.map((row) => ({ turn: row.turn, tokens: row.usage?.prompt_tokens_details?.cached_tokens ?? null })),
-    ctx_hit_turn: ctxHit ? { turn: ctxHit.turn, what: ctxHit.error ? 'error' : ctxHit.empty ? 'empty' : 'answered', prompt_tokens: ctxHit.usage?.prompt_tokens ?? null } : null,
+    ctx_hit_turn: ctxHit ? { turn: ctxHit.turn, what: ctxHit.error ? 'error' : ctxHit.empty ? 'empty' : 'answered', prompt_tokens: held(ctxHit) } : null,
   }
 }
 

@@ -89,7 +89,7 @@ if (M.stress) {
   section('Stress', table(['session', 'turns', 'errors', 'empty', 'ttft p50 / p95', 'tps p50', 'total p50 / p95', 'ttft slope ms/turn', 'rss tree peak', 'rss slope B/s', 'system used slope B/s', 'ctx hit'],
     M.stress.sessions.map((s) => [`${s.id} r${s.run}`, s.turns, { text: pct(s.error_rate), cls: cls(s.error_rate, 0.99, 0.9, true) }, pct(s.empty_rate), `${ms(s.ttft_p50)} / ${ms(s.ttft_p95)}`, num(s.tps_p50, 1), `${ms(s.total_p50)} / ${ms(s.total_p95)}`, num(s.ttft_slope_ms_per_turn, 1), gb(s.memory.rss_tree_peak), num(s.memory.rss_tree_slope_bps), num(s.memory.system_used_slope_bps), s.ctx_hit_turn ? `turn ${s.ctx_hit_turn.turn} (${s.ctx_hit_turn.what}, ${s.ctx_hit_turn.prompt_tokens} tokens)` : 'none']), [1,2,3,5,7,8,9,10]),
     $('div', { class: 'small' }, `rss peak spread between sessions: ${pct(M.stress.rss_peak_spread)}`))
-  for (const s of M.stress.sessions) root.append($('details', {}, $('summary', {}, `${s.id} r${s.run}: prompt tokens by turn`), table(['turn', ...s.prompt_tokens_by_turn.map((t) => t.turn)], [['prompt', ...s.prompt_tokens_by_turn.map((t) => t.tokens)], ['cached', ...s.cached_tokens_by_turn.map((t) => t.tokens ?? 'n/a')]])))
+  for (const s of M.stress.sessions) root.append($('details', {}, $('summary', {}, `${s.id} r${s.run}: context tokens by turn`), table(['turn', ...s.prompt_tokens_by_turn.map((t) => t.turn)], [['context', ...s.prompt_tokens_by_turn.map((t) => t.tokens)], ['cached', ...s.cached_tokens_by_turn.map((t) => t.tokens ?? 'n/a')]])))
 }
 
 // ---- hardware ----------------------------------------------------------
