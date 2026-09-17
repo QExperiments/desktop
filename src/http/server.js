@@ -93,7 +93,7 @@ export const createServer = (runtime) => {
           .catch((error) => request.log.warn(error))
       }
       if (evalRun) {
-        const trace = { id, run: evalRun, session: session ?? null, at: new Date().toISOString(), query, text: result.text, citations: result.citations, hits: result.hits.map(({ content, ...hit }) => hit), messages: result.messages, rounds: result.rounds, usage: result.usage, stats }
+        const trace = { id, run: evalRun, session: session ?? null, at: new Date().toISOString(), query, text: result.text, citations: result.citations, hits: result.hits, messages: result.messages, rounds: result.rounds, usage: result.usage, stats }
         await traces.write(evalRun, id, trace).catch((error) => request.log.warn(error))
       }
       const { tool_calls, ...numbers } = stats
