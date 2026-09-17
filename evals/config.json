@@ -1,0 +1,29 @@
+{
+  "port": 11435,
+  "runs": 3,
+  "sampleMs": 500,
+  "tier": "M",
+  "mode": "live",
+  "requestTimeoutMs": 300000,
+  "models": {
+    "S": null,
+    "M": null,
+    "L": null
+  },
+  "judge": {
+    "constant": "QWEN3_5_9B_MULTIMODAL_Q4_K_M",
+    "batch": 1,
+    "ctx": 8192,
+    "temp": 0,
+    "predict": 700
+  },
+  "judgeCategories": [
+    "single"
+  ],
+  "ctx": {
+    "S": 8192,
+    "M": 16384,
+    "L": 32768
+  },
+  "predict": 320
+}

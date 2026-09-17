@@ -16,7 +16,7 @@
     "corpus:ingest": "node scripts/corpus-ingest.js",
     "test": "node --test 'test/unit/**/*.test.js'",
     "test:e2e": "node --test --test-timeout=1800000 'test/e2e/**/*.test.js'",
-    "eval": "node scripts/stub.js eval",
+    "eval": "node evals/run.mjs",
     "build": "node scripts/build.js",
     "build:full": "node scripts/build.js --full"
   },

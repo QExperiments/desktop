@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<style>
+  :root { --ink: #1c1c1c; --muted: #666; --line: #ddd; --ok: #1a7f37; --bad: #b3261e; --warn: #9a6700; --bg: #fff; --alt: #f6f6f6; }
+  body { font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: var(--ink); background: var(--bg); margin: 0; padding: 24px 16px 64px; max-width: 1200px; margin-inline: auto; }
+  h1 { font-size: 22px; margin: 0 0 4px; } h2 { font-size: 17px; margin: 32px 0 8px; border-bottom: 1px solid var(--line); padding-bottom: 4px; } h3 { font-size: 14px; margin: 16px 0 6px; color: var(--muted); }
+  .sub { color: var(--muted); margin-bottom: 16px; }
+  table { border-collapse: collapse; width: 100%; margin: 6px 0 12px; font-size: 13px; } th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); vertical-align: top; } th { background: var(--alt); font-weight: 600; white-space: nowrap; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .ok { color: var(--ok); } .bad { color: var(--bad); } .warn { color: var(--warn); }
+  .wrap { overflow-x: auto; }
+  details { margin: 8px 0; } summary { cursor: pointer; color: var(--muted); }
+  .answer { white-space: pre-wrap; min-width: 220px; max-width: 520px; }
+  .small { font-size: 12px; color: var(--muted); }
+  svg { width: 100%; height: 240px; background: var(--alt); border: 1px solid var(--line); }
+  .legend span { display: inline-block; margin-right: 14px; } .legend i { display: inline-block; width: 18px; height: 3px; vertical-align: middle; margin-right: 4px; }
+  code { background: var(--alt); padding: 0 4px; border-radius: 3px; }
+</style>
+</head>
+<body>
+<h1 id="title"></h1>
+<div class="sub" id="sub"></div>
+<div id="root"></div>
+<script id="data" type="application/json">__DATA__</script>
+<script>
+const D = JSON.parse(document.getElementById('data').textContent)
+const M = D.metrics, H = M.header || {}
+const $ = (tag, attrs = {}, ...kids) => { const el = document.createElement(tag); for (const [k, v] of Object.entries(attrs)) k === 'class' ? el.className = v : k === 'html' ? el.innerHTML = v : el.setAttribute(k, v); for (const kid of kids.flat()) el.append(kid?.nodeType ? kid : document.createTextNode(String(kid ?? ''))); return el }
+const fin = (v) => typeof v === 'number' && Number.isFinite(v)
+const gb = (b) => fin(b) ? (b / 1024 ** 3).toFixed(2) + ' GB' : 'n/a'
+const pct = (v) => fin(v) ? Math.round(v * 100) + '%' : 'n/a'
+const num = (v, d = 0) => fin(v) ? Number(v).toFixed(d) : 'n/a'
+const ms = (v) => fin(v) ? Math.round(v) + ' ms' : 'n/a'
+const cls = (v, good = 0.8, bad = 0.5, invert = false) => { if (!fin(v)) return ''; const x = invert ? 1 - v : v; return x >= good ? 'ok' : x < bad ? 'bad' : 'warn' }
+const table = (headers, rows, numeric = []) => $('div', { class: 'wrap' }, $('table', {}, $('thead', {}, $('tr', {}, headers.map((h, i) => $('th', { class: numeric.includes(i) ? 'num' : '' }, h)))), $('tbody', {}, rows.map((r) => $('tr', {}, r.map((c, i) => $('td', { class: (numeric.includes(i) ? 'num ' : '') + (c && c.cls ? c.cls : '') }, c && c.text !== undefined ? c.text : c)))))))
+const kv = (obj) => obj ? Object.entries(obj).map(([k, v]) => `${k} ${v}`).join(', ') : 'n/a'
+const root = document.getElementById('root')
+const section = (title, ...kids) => root.append($('h2', {}, title), ...kids)
+
+document.getElementById('title').textContent = `Eval report ${H.ts || ''}`
+document.getElementById('sub').textContent = `${H.hardware?.cpu || '?'} · ${gb(H.hardware?.totalBytes)} RAM · ${H.hardware?.backend || '?'} · tier ${H.tier} · chat ${H.chatModel || '?'} · embed ${H.embedModel || '?'} · ${H.runs} run(s) · cold start ${ms(H.coldStartMs)} · ${M.latency?.n ?? 0} live turns, ${M.latency?.errors ?? 0} errors · judge ${H.judge || 'off'}`
+
+// ---- headline ----------------------------------------------------------
+const L = M.latency || {}
+section('Latency, all live turns', table(['ttft p50', 'ttft p95', 'ttft client p50', 'tps p50', 'total p50', 'total p95', 'prefill tps p50', 'cache ratio', 'prompt tokens', 'completion tokens', 'thinking chars'],
+  [[ms(L.ttft_p50), ms(L.ttft_p95), ms(L.ttft_client_p50), num(L.tps_p50, 1), ms(L.total_p50), ms(L.total_p95), num(L.prefill_tps_p50), num(L.cache_ratio_mean, 2), num(L.prompt_tokens_mean), num(L.completion_tokens_mean), num(L.thinking_chars_mean)]], [0,1,2,3,4,5,6,7,8,9,10]))
+
+const textRow = (s) => [{ text: pct(s.must_rate), cls: cls(s.must_rate) }, { text: pct(s.number_match_mean), cls: cls(s.number_match_mean) }, { text: pct(s.grounded_rate), cls: cls(s.grounded_rate) }, pct(s.citation_precision_mean), pct(s.lang_rate), { text: pct(s.empty_rate), cls: cls(s.empty_rate, 0.95, 0.8, true) }, { text: pct(s.leak_rate), cls: cls(s.leak_rate, 0.95, 0.8, true) }, pct(s.abstained_rate)]
+const textHead = ['must', 'number match', 'grounded', 'citation precision', 'lang', 'empty', 'leak', 'abstained']
+const cats = ['single', 'abstain', 'tools', 'memory', 'multiturn'].filter((c) => M[c])
+if (cats.length) section('Code metrics by category', table(['category', 'turns', ...textHead, 'ttft p50', 'total p50'], cats.map((c) => [c, M[c].n ?? M[c].latency?.n, ...textRow(M[c]), ms(M[c].latency?.ttft_p50), ms(M[c].latency?.total_p50)]), [1,2,3,4,5,6,7,8,9,10,11]))
+
+if (M.retrieval) section('Retrieval (no model)', table(['queries', 'recall@k', 'precision@k', 'MRR', 'hit@1', 'retrieval ms p50'], [[M.retrieval.n, { text: pct(M.retrieval.recall_at_k), cls: cls(M.retrieval.recall_at_k) }, pct(M.retrieval.precision_at_k), num(M.retrieval.mrr, 2), pct(M.retrieval.hit_at_1), ms(M.retrieval.retrieval_ms_p50)]], [0,1,2,3,4,5]))
+
+if (M.single?.judge) {
+  const j = M.single.judge
+  section('Judge on single', table(['verdicts', 'parse ok', 'faithfulness', 'hallucination', 'evidence verified', 'answered', 'correct', 'relevance', 'kappa vs labels', 'ms per verdict'],
+    [[j.n, pct(j.parse_ok_rate), { text: pct(j.faithfulness_mean), cls: cls(j.faithfulness_mean) }, { text: pct(j.hallucination_rate), cls: cls(j.hallucination_rate, 0.9, 0.6, true) }, pct(j.evidence_verified_mean), kv(j.answered), kv(j.correct), kv(j.relevance), j.kappa ? kv(j.kappa) : 'no labels yet', num(j.ms_mean)]], [0,1,2,3,4,9]))
+}
+if (M.abstain) {
+  const a = M.abstain
+  section('Abstain', table(['cases', 'abstained', 'tool called', 'grounded', 'by kind', 'abstention precision', 'abstention recall', 'false abstain on single'],
+    [[a.n, { text: pct(a.abstained_rate), cls: cls(a.abstained_rate) }, pct(a.tool_called_rate), pct(a.grounded_rate), Object.entries(a.by_kind || {}).map(([k, v]) => `${k} ${pct(v.abstained_rate)} (${v.n})`).join(', '), pct(M.abstention?.precision), pct(M.abstention?.recall), M.abstention ? M.abstention.fp : 'n/a']], [0,1,2,3,5,6,7]))
+}
+if (M.tools) {
+  const t = M.tools
+  section('Tools', table(['cases', 'routing precision', 'routing recall', 'tp / wrong / fp / fn / tn', 'args match', 'wrong tool', 'must', 'rounds mean', 'repeat calls', 'limit hits', 'tool errors'],
+    [[t.n, { text: pct(t.routing.precision), cls: cls(t.routing.precision) }, { text: pct(t.routing.recall), cls: cls(t.routing.recall) }, `${t.routing.tp} / ${t.routing.wrong} / ${t.routing.fp} / ${t.routing.fn} / ${t.routing.tn}`, pct(t.args_subset_rate), pct(t.wrong_tool_rate), pct(t.must_rate), num(t.rounds_mean, 2), t.repeat_calls, t.limit_hits, t.tool_errors]], [0,1,2,4,5,6,7,8,9,10]))
+}
+const toolStats = ['memory', 'multiturn', 'stress'].filter((c) => M[c]?.stats)
+if (toolStats.length) section('Tool statistics in sessions', table(['category', 'turns', 'calls', 'calls per turn', 'turns with tool', 'per tool', 'rounds mean', 'repeat calls', 'limit hits', 'tool errors', 'tool ms total'], toolStats.map((c) => { const s = M[c].stats; return [c, s.turns, s.calls, s.calls_per_turn, pct(s.turns_with_tool), kv(s.per_tool), s.rounds_mean, s.repeat_calls, s.limit_hits, s.tool_errors, s.tool_ms_total] }), [1,2,3,4,6,7,8,9,10]))
+
+if (M.memory) {
+  const m = M.memory
+  section('Memory', table(['sessions', 'recalls', 'memory overall', 'recalled from memory', 're-fetched', 'memory@d'],
+    [[m.n_sessions, m.n_recalls, { text: pct(m.memory_overall), cls: cls(m.memory_overall) }, pct(m.recalled_from_memory), pct(m.re_fetched), (m.by_d || []).map((d) => `d=${d.d}: ${pct(d.rate)} (${d.passed}/${d.n})`).join(' · ')]], [0,1,2,3,4]),
+    $('h3', {}, 'Prompt tokens by turn (mean over sessions)'), table(['turn', ...(m.prompt_tokens_by_turn || []).map((t) => t.turn)], [['prompt tokens', ...(m.prompt_tokens_by_turn || []).map((t) => num(t.mean))]]))
+}
+if (M.multiturn) {
+  const m = M.multiturn
+  section('Multiturn', table(['sessions', 'follow-ups', 'followup resolution', 'consistency pairs', 'consistency', 'must', 'routing precision', 'routing recall'],
+    [[m.n_sessions, m.n_followups, { text: pct(m.followup_resolution), cls: cls(m.followup_resolution) }, m.n_pairs, { text: pct(m.consistency), cls: cls(m.consistency) }, pct(m.must_rate), pct(m.routing?.precision), pct(m.routing?.recall)]], [0,1,2,3,4,5,6,7]))
+}
+if (M.stress) {
+  section('Stress', table(['session', 'turns', 'errors', 'empty', 'ttft p50 / p95', 'tps p50', 'total p50 / p95', 'ttft slope ms/turn', 'rss tree peak', 'rss slope B/s', 'system used slope B/s', 'ctx hit'],
+    M.stress.sessions.map((s) => [`${s.id} r${s.run}`, s.turns, { text: pct(s.error_rate), cls: cls(s.error_rate, 0.99, 0.9, true) }, pct(s.empty_rate), `${ms(s.ttft_p50)} / ${ms(s.ttft_p95)}`, num(s.tps_p50, 1), `${ms(s.total_p50)} / ${ms(s.total_p95)}`, num(s.ttft_slope_ms_per_turn, 1), gb(s.memory.rss_tree_peak), num(s.memory.rss_tree_slope_bps), num(s.memory.system_used_slope_bps), s.ctx_hit_turn ? `turn ${s.ctx_hit_turn.turn} (${s.ctx_hit_turn.what}, ${s.ctx_hit_turn.prompt_tokens} tokens)` : 'none']), [1,2,3,5,7,8,9,10]),
+    $('div', { class: 'small' }, `rss peak spread between sessions: ${pct(M.stress.rss_peak_spread)}`))
+  for (const s of M.stress.sessions) root.append($('details', {}, $('summary', {}, `${s.id} r${s.run}: prompt tokens by turn`), table(['turn', ...s.prompt_tokens_by_turn.map((t) => t.turn)], [['prompt', ...s.prompt_tokens_by_turn.map((t) => t.tokens)], ['cached', ...s.cached_tokens_by_turn.map((t) => t.tokens ?? 'n/a')]])))
+}
+
+// ---- hardware ----------------------------------------------------------
+if (M.hardware) {
+  const ph = M.hardware.phases
+  section('Hardware by phase', table(['phase', 'samples', 'rss tree peak', 'rss tree mean', 'rss bare peak', 'system used mean', 'system used peak', 'cpu % mean', 'gpu % mean'],
+    Object.entries(ph).map(([p, v]) => [p, v.samples, gb(v.rss_tree_peak), gb(v.rss_tree_mean), gb(v.rss_bare_peak), gb(v.system_used_mean), gb(v.system_used_peak), num(v.cpu_mean), num(v.gpu_util_mean)]), [1,2,3,4,5,6,7,8]),
+    $('div', { class: 'small' }, `System memory used: +${gb(M.hardware.system_used_delta_load)} after load; ${gb(M.hardware.system_used_delta_after_unload)} above base after unload. RSS undercounts mmap'd weights on Apple Silicon; system used is the fleet-relevant number, rss tree the process-only one.`))
+  // SVG polyline: rss tree and system used over time, phase bands behind.
+  const rows = D.hardware.filter((h) => fin(h.t))
+  if (rows.length > 1) {
+    const W = 1100, Hh = 240, pad = 40
+    const t0 = rows[0].t, t1 = rows[rows.length - 1].t
+    const x = (t) => pad + (t - t0) / Math.max(1, t1 - t0) * (W - 2 * pad)
+    const series = [['rss_tree', '#1f6feb'], ['system_used', '#b3261e']]
+    const max = Math.max(...rows.flatMap((r) => series.map(([k]) => r[k] || 0)), 1)
+    const y = (v) => Hh - pad / 2 - (v / max) * (Hh - pad)
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+    svg.setAttribute('viewBox', `0 0 ${W} ${Hh}`)
+    const colors = { before_load: '#eee', loaded_idle: '#e6f0ff', generating: '#fff3d6', after_generation: '#e6f0ff', after_unload: '#eee' }
+    let start = rows[0]
+    for (let i = 1; i <= rows.length; i++) {
+      if (i === rows.length || rows[i].phase !== start.phase) {
+        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
+        rect.setAttribute('x', x(start.t)); rect.setAttribute('y', 0); rect.setAttribute('width', Math.max(1, x((rows[i] || rows[i - 1]).t) - x(start.t))); rect.setAttribute('height', Hh); rect.setAttribute('fill', colors[start.phase] || '#fff')
+        svg.append(rect)
+        if (i < rows.length) start = rows[i]
+      }
+    }
+    for (const [key, color] of series) {
+      const pl = document.createElementNS('http://www.w3.org/2000/svg', 'polyline')
+      pl.setAttribute('points', rows.filter((r) => fin(r[key])).map((r) => `${x(r.t).toFixed(1)},${y(r[key]).toFixed(1)}`).join(' '))
+      pl.setAttribute('fill', 'none'); pl.setAttribute('stroke', color); pl.setAttribute('stroke-width', '1.5')
+      svg.append(pl)
+    }
+    for (const frac of [0, 0.5, 1]) {
+      const label = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+      label.setAttribute('x', 4); label.setAttribute('y', y(max * frac) + 4); label.setAttribute('font-size', '11'); label.textContent = gb(max * frac)
+      svg.append(label)
+    }
+    root.append(svg, $('div', { class: 'legend small' }, $('span', {}, $('i', { style: 'background:#1f6feb' }), 'rss tree (node + bare)'), $('span', {}, $('i', { style: 'background:#b3261e' }), 'system memory used'), $('span', {}, 'bands: grey before load / after unload, blue idle, yellow generating')))
+  }
+}
+
+// ---- per turn ----------------------------------------------------------
+const verdictBy = Object.fromEntries(D.verdicts.map((v) => [`${v.category}#${v.id}#${v.run}#${v.turn}`, v]))
+const yesno = (v) => v === true ? { text: 'yes', cls: 'ok' } : v === false ? { text: 'no', cls: 'bad' } : 'n/a'
+for (const cat of ['retrieval', 'single', 'abstain', 'tools', 'memory', 'multiturn', 'stress']) {
+  const rows = D.turns.filter((t) => t.category === cat)
+  if (!rows.length) continue
+  const details = $('details', {}, $('summary', {}, `${cat}: ${rows.length} turns`))
+  if (cat === 'retrieval') {
+    details.append(table(['id', 'query', 'gold', 'top files', 'recall', 'MRR', 'ms'], rows.map((r) => [r.id, r.query, (r.gold || []).join(', '), (r.files || []).join(', '), { text: pct(r.recall), cls: cls(r.recall) }, num(r.mrr, 2), r.retrieval_ms]), [4,5,6]))
+  } else {
+    details.append(table(['id', 'run', 'turn', 'query', 'answer', 'citations', 'tools', 'must', 'grounded', 'abstained', 'judge', 'ttft', 'total', 'prompt / cached / completion'], rows.map((r) => {
+      const v = verdictBy[`${cat}#${r.id}#${r.run}#${r.turn}`]
+      const judge = v ? (v.parse_ok ? `${v.verdict.answered ?? v.verdict.behaviour ?? ''} / ${v.verdict.correct ?? ''} · faith ${pct(v.derived?.faithfulness)}${v.derived?.hallucination ? ' · HALLUCINATION' : ''}` : `parse error`) : ''
+      return [r.id, r.run, r.turn, $('div', { class: 'answer' }, r.query), $('div', { class: 'answer' }, r.error ? `ERROR ${r.status}: ${r.error}` : r.text), (r.citations || []).map((c) => c.file + (c.reused ? '*' : '')).join(', '), (r.tool_calls || []).map((c) => `${c.name}(${JSON.stringify(c.args || {})})${c.error ? ' ✗' : ''}`).join(' '), yesno(r.must), yesno(r.grounded), r.abstained ? 'yes' : 'no', judge, ms(r.stats?.ttft_ms), ms(r.wall_ms), r.usage ? `${r.usage.prompt_tokens} / ${r.usage.prompt_tokens_details?.cached_tokens ?? 0} / ${r.usage.completion_tokens}` : 'n/a']
+    }), [1,2,11,12]))
+  }
+  root.append($('h2', {}, `Turns: ${cat}`), details)
+}
+</script>
+</body>
+</html>
