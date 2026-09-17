@@ -169,8 +169,9 @@ but it does have `user`.
 **Decision.** `/v1/chat/completions` takes the session from the request's
 `user` field or an `x-session-id` header and passes it as
 `meridian-<session>`. Without either, no cache is used. The route also
-forwards the client's earlier user and assistant turns (the last six) so
-the model has the conversation with or without a cache. Rounds of the tool
+forwards all of the client's earlier user and assistant turns (N-9 dropped the
+six-turn cap; `ctx_size` is the bound) so the model has the conversation with or
+without a cache. Rounds of the tool
 loop share the key.
 
 **Consequences.** Measured on tier M: within one question the tool loop's

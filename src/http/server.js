@@ -41,13 +41,13 @@ export const createServer = (runtime) => {
     if (typeof question !== 'string' || question.trim() === '') {
       return openaiError(reply, 400, 'messages must end with a user message carrying text content', 'invalid_request_error')
     }
-    // Earlier turns give the model the conversation; the last six keep a long
-    // chat inside the context window. A session key (OpenAI's `user` field or
-    // an x-session-id header) lets the SDK keep the KV state between calls.
+    // Earlier turns go to the model as the client sent them; the chat model's
+    // ctx_size (4096 in models.json) is the only bound. A session key (OpenAI's
+    // `user` field or an x-session-id header) lets the SDK keep the KV state
+    // between calls.
     const lastUser = messages.findLastIndex((message) => message?.role === 'user')
     const prior = messages.slice(0, lastUser)
       .filter((message) => (message?.role === 'user' || message?.role === 'assistant') && typeof message.content === 'string')
-      .slice(-6)
     const session = typeof request.body?.user === 'string' ? request.body.user : request.headers['x-session-id']
 
     const generationParams = {}
