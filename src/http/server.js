@@ -67,7 +67,7 @@ export const createServer = (runtime) => {
         send({ id, object: 'chat.completion.chunk', created, model: config.chatModel, choices: [{ index: 0, delta, finish_reason }], ...extra })
       try {
         let first = true
-        const { citations } = await answer(runtime, {
+        const { text, citations } = await answer(runtime, {
           question,
           prior,
           session,
@@ -79,6 +79,11 @@ export const createServer = (runtime) => {
             chunk({ content })
           },
         })
+        // Nothing streamed (the model wrote no prose) but answer() still has text.
+        if (first && text) {
+          chunk({ role: 'assistant' })
+          chunk({ content: text })
+        }
         chunk({ citations }, 'stop', { grounded: citations.length > 0 })
       } catch (error) {
         request.log.error(error)
