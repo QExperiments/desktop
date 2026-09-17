@@ -22,7 +22,8 @@ function buildContext(results) {
   return ['Use the retrieved context below to answer. Ground your answer in it; do not invent facts beyond it.', '', ...parts].join('\n\n')
 }
 
-export const answer = async (runtime, { question, ...params }) => {
+// onDelta, when given, receives each content token as it is generated.
+export const answer = async (runtime, { question, onDelta, ...params }) => {
   // Retrieve fresh context on every request. If retrieval is unavailable, fall
   // back to a plain answer rather than failing the whole request.
   let citations = []
@@ -51,6 +52,7 @@ export const answer = async (runtime, { question, ...params }) => {
   })
 
   try {
+    if (onDelta) for await (const event of run.events) if (event.type === 'contentDelta') onDelta(event.text)
     const final = await run.final
     // Shape fixed by req 5.2 of the eval protocol, so callers can rely on it.
     return { text: (final.contentText ?? '').trim(), citations }

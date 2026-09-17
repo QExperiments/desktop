@@ -124,6 +124,7 @@ The chat model loads with `ctx_size: 4096` (SDK default 1024) and the
 corpus is chunked at 512 tokens, so three retrieved chunks plus the answer
 fit; the first live call overflowed 1024 with whole-document chunks.
 
-**Consequences.** The eval harness can score the route. Streaming still
-answers 501 until it is built (req 2.4). Tools are not yet in the loop
-(req 3); until they are, 6.1.1 is met for retrieval and grounding only.
+**Consequences.** The eval harness can score the route. `stream: true`
+answers OpenAI SSE chunks, citations and `grounded` on the last one (req
+2.4). Tools are not yet in the loop (req 3); until they are, 6.1.1 is met
+for retrieval and grounding only.
