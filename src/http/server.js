@@ -4,6 +4,7 @@ import Fastify from 'fastify'
 import { answer } from '../chat/answer.js'
 import { config } from '../config.js'
 import { registerMedia } from './media.js'
+import { createSessions } from './sessions.js'
 import { registerUi } from './ui.js'
 
 const openaiError = (reply, code, message, type) =>
@@ -12,10 +13,11 @@ const openaiError = (reply, code, message, type) =>
 export const createServer = (runtime) => {
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } })
   const api = config.apiPrefix
+  const sessions = createSessions(config.sessionsDir)
 
   app.register(multipart, { limits: { fileSize: 32 * 1024 * 1024 } })
   app.register(async (scope) => registerUi(scope, runtime))
-  app.register(async (scope) => registerMedia(scope, runtime))
+  app.register(async (scope) => registerMedia(scope, runtime, sessions))
 
   app.get(`${api}/models`, (_request, reply) => {
     const state = runtime.snapshot()
@@ -28,6 +30,11 @@ export const createServer = (runtime) => {
   })
 
   app.get('/health', () => runtime.snapshot())
+
+  // Earlier chats, for the chat page. Text, voice and image turns all land here.
+  app.get(`${api}/sessions`, () => sessions.list())
+  app.get(`${api}/sessions/:id`, async (request, reply) =>
+    (await sessions.get(request.params.id)) ?? openaiError(reply, 404, `no session ${request.params.id}`, 'not_found'))
 
   app.post(`${api}/cancel/:requestId`, async (request, reply) => {
     const entry = await runtime.cancel(request.params.requestId)
@@ -48,7 +55,11 @@ export const createServer = (runtime) => {
     const lastUser = messages.findLastIndex((message) => message?.role === 'user')
     const prior = messages.slice(0, lastUser)
       .filter((message) => (message?.role === 'user' || message?.role === 'assistant') && typeof message.content === 'string')
-    const session = typeof request.body?.user === 'string' ? request.body.user : request.headers['x-session-id']
+    const header = request.headers['x-session-id']
+    const session = typeof request.body?.user === 'string' ? request.body.user : Array.isArray(header) ? header[0] : header
+    const remember = (text, citations) => {
+      if (session) sessions.append(session, { kind: 'text', question, answer: text, citations }).catch((error) => request.log.warn(error))
+    }
 
     const generationParams = {}
 
@@ -85,6 +96,7 @@ export const createServer = (runtime) => {
           chunk({ content: text })
         }
         chunk({ citations }, 'stop', { grounded: citations.length > 0 })
+        remember(text, citations)
       } catch (error) {
         request.log.error(error)
         send({ error: { message: error.message, type: 'server_error' } })
@@ -95,6 +107,7 @@ export const createServer = (runtime) => {
     }
 
     const { text, citations } = await answer(runtime, { question, prior, session, generationParams })
+    remember(text, citations)
 
     return {
       id,
