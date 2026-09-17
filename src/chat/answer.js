@@ -1,4 +1,5 @@
 import { search } from '../rag/retrieve.mjs'
+import { summarize } from './stats.js'
 import { toolCitation, tools } from './tools.js'
 
 // One place where a query becomes an answer. Retrieval, grounding and the
@@ -57,6 +58,7 @@ const buildUserTurn = (hits, query) => {
 // turn: the messages added (user turn with excerpts, tool rounds, the final
 // answer), the chunks shown, and the retrieval hits.
 export const answer = async (runtime, { messages, session, shown = [], onDelta, ...params }) => {
+  const startedAt = Date.now()
   const query = messages.at(-1)?.role === 'user' ? messages.at(-1).content : ''
   const prior = messages.slice(0, messages.at(-1)?.role === 'user' ? -1 : undefined).map(({ role, content }) => ({ role, content }))
   const seen = new Set(shown)
@@ -75,6 +77,10 @@ export const answer = async (runtime, { messages, session, shown = [], onDelta, 
       runtime.log?.error?.(err)
     }
   }
+  const retrievalMs = Date.now() - startedAt
+  // One entry per completion round: the SDK's stats and the tool calls made.
+  const rounds = []
+  const done = (text) => ({ text, citations, messages: turn, hits, rounds, ...summarize({ startedAt, retrievalMs, rounds }) })
 
   const citations = hits.map((hit) => ({ file: hit.file, score: hit.score, ...(hit.reused ? { reused: true } : {}) }))
   // Messages this turn adds to the conversation, in the order the model sees them.
@@ -105,11 +111,14 @@ export const answer = async (runtime, { messages, session, shown = [], onDelta, 
       if (onDelta) for await (const event of run.events) if (event.type === 'contentDelta') onDelta(event.text)
       const final = await run.final
       const calls = (await final.toolCalls) ?? []
+      // thinkingChars: how much the model reasoned before answering; it costs generated tokens.
+      const entry = { stats: final.stats ?? null, toolCalls: [], thinkingChars: (final.thinkingText ?? '').length }
+      rounds.push(entry)
       if (calls.length === 0 || round >= MAX_TOOL_ROUNDS) {
         const text = (final.contentText ?? '').trim()
         turn.push({ role: 'assistant', content: text })
-        // Shape fixed by req 5.2 of the eval protocol, so callers can rely on it.
-        return { text, citations, messages: turn, hits }
+        // text and citations are the shape req 5.2 of the eval protocol fixes.
+        return done(text)
       }
 
       const push = (message) => { history.push(message); turn.push(message) }
@@ -117,9 +126,11 @@ export const answer = async (runtime, { messages, session, shown = [], onDelta, 
       for (const call of calls) {
         const tool = toolByName[call.name]
         tries[call.name] = (tries[call.name] ?? 0) + 1
+        const t0 = Date.now()
         const result = !tool ? { error: `unknown tool ${call.name}` }
           : tries[call.name] > tool.maxTries ? { error: `${call.name} was already called for this question; use its earlier result` }
           : await call.invoke()
+        entry.toolCalls.push({ name: call.name, args: call.arguments ?? null, ms: Date.now() - t0, ...(result?.error ? { error: String(result.error) } : {}) })
         push({ role: 'tool', content: afterTool(result) })
         const cite = toolCitation[call.name]
         if (cite && !citations.some((c) => c.file === cite.file)) citations.push(cite)

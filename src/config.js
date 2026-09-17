@@ -24,6 +24,8 @@ export const config = {
   manifestPath: abs('data/models/manifest.json'),
   pidPath: abs('data/serve.pid'),
   sessionsDir: abs('data/sessions'),
+  // Written only for requests that carry `x-eval-run`; see src/http/trace.js.
+  tracesDir: abs('data/traces'),
   importDir: process.env.MERIDIAN_MODELS_DIR ?? '',
   tierOverride: process.env.MERIDIAN_TIER?.toUpperCase() ?? '',
   logContent: process.env.LOG_CONTENT === '1',
