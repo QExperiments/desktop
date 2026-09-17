@@ -8,46 +8,80 @@
       :root { --ink: #1c1916; --muted: #5c564e; --paper: #f4efe6; --card: #fffdf9; --line: #e4dccb; --accent: #8c2f1b; }
       * { box-sizing: border-box; }
       html, body { height: 100%; margin: 0; }
-      body { display: flex; flex-direction: column; font: 16px/1.5 ui-sans-serif, system-ui, sans-serif; color: var(--ink); background: var(--paper); }
+      body { display: flex; font: 16px/1.5 ui-sans-serif, system-ui, sans-serif; color: var(--ink); background: var(--paper); }
+      aside { width: 240px; flex: none; display: flex; flex-direction: column; border-right: 1px solid var(--line); background: var(--card); }
+      aside .top { padding: 0.75rem; border-bottom: 1px solid var(--line); }
+      aside .top button { width: 100%; }
+      aside ul { list-style: none; margin: 0; padding: 0.5rem; overflow-y: auto; flex: 1; }
+      aside li { padding: 0.45rem 0.6rem; border-radius: 8px; cursor: pointer; font-size: 0.85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      aside li:hover { background: var(--paper); }
+      aside li.active { background: var(--paper); font-weight: 600; }
+      aside li small { display: block; color: var(--muted); font-weight: 400; font-size: 0.7rem; }
+      aside .foot { padding: 0.6rem 0.75rem; border-top: 1px solid var(--line); font-size: 0.75rem; color: var(--muted); }
+      aside .foot a { color: var(--muted); }
+      section { flex: 1; min-width: 0; display: flex; flex-direction: column; }
       header { display: flex; align-items: center; gap: 0.75rem; padding: 0.7rem 1rem; border-bottom: 1px solid var(--line); background: var(--card); }
       header h1 { font-size: 1rem; margin: 0; }
       header .status { flex: 1; color: var(--muted); font-size: 0.8rem; }
-      header a { color: var(--muted); font-size: 0.8rem; }
       button { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 8px; padding: 0.4rem 0.8rem; cursor: pointer; }
       button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+      button.icon { width: 2.6rem; height: 2.6rem; padding: 0; font-size: 1.1rem; display: inline-flex; align-items: center; justify-content: center; }
+      button.icon.live { background: var(--accent); color: #fff; border-color: var(--accent); }
       button:disabled { opacity: 0.5; cursor: default; }
       main { flex: 1; overflow-y: auto; }
       .thread { max-width: 760px; margin: 0 auto; padding: 1.25rem 1rem 2rem; display: flex; flex-direction: column; gap: 1rem; }
       .msg { max-width: 85%; white-space: pre-wrap; word-break: break-word; }
       .msg.user { align-self: flex-end; background: var(--accent); color: #fff; border-radius: 16px 16px 4px 16px; padding: 0.6rem 0.9rem; }
+      .msg.user img { display: block; max-width: 240px; max-height: 240px; border-radius: 10px; margin-bottom: 0.4rem; }
       .msg.assistant { align-self: flex-start; }
       .cites { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.5rem; }
       .cites code { font-size: 0.75rem; background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 0.1rem 0.55rem; }
+      .actions { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.4rem; color: var(--muted); font-size: 0.75rem; }
+      .actions button { padding: 0.15rem 0.5rem; font-size: 0.9rem; }
       .empty { text-align: center; color: var(--muted); margin: 4rem 0 0.5rem; }
       .examples { display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: center; }
       .error { color: var(--accent); font-size: 0.9rem; }
       footer { border-top: 1px solid var(--line); background: var(--card); padding: 0.75rem 1rem 0.5rem; }
       .composer { max-width: 760px; margin: 0 auto; display: flex; gap: 0.5rem; align-items: flex-end; }
-      textarea { flex: 1; font: inherit; resize: none; min-height: 2.8rem; max-height: 10rem; padding: 0.6rem 0.8rem; border: 1px solid var(--line); border-radius: 12px; background: #fff; color: var(--ink); }
+      .box { flex: 1; min-width: 0; }
+      .attach { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem; font-size: 0.8rem; color: var(--muted); }
+      .attach[hidden] { display: none; }
+      .attach img { height: 48px; border-radius: 6px; }
+      textarea { width: 100%; font: inherit; resize: none; min-height: 2.6rem; max-height: 10rem; padding: 0.55rem 0.8rem; border: 1px solid var(--line); border-radius: 12px; background: #fff; color: var(--ink); }
       textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
-      .hint { max-width: 760px; margin: 0.35rem auto 0; color: var(--muted); font-size: 0.75rem; text-align: center; }
+      .hint { max-width: 760px; margin: 0.35rem auto 0; color: var(--muted); font-size: 0.75rem; text-align: center; display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
+      @media (max-width: 720px) { aside { display: none; } }
     </style>
   </head>
   <body>
-    <header>
-      <h1>Meridian Assistant</h1>
-      <span class="status" id="status"></span>
-      <a href="/ui">Test console</a>
-      <button type="button" id="new">New chat</button>
-    </header>
-    <main id="main"><div class="thread" id="thread"></div></main>
-    <footer>
-      <div class="composer">
-        <textarea id="q" rows="1" placeholder="Ask about the documents or stock. Enter sends, Shift+Enter is a new line."></textarea>
-        <button type="button" class="primary" id="send">Send</button>
-      </div>
-      <p class="hint">Answers come from the ingested documents and the stock tool only; each answer lists its sources.</p>
-    </footer>
+    <aside>
+      <div class="top"><button type="button" class="primary" id="new">New chat</button></div>
+      <ul id="sessions"></ul>
+      <div class="foot"><a href="/ui">Test console</a></div>
+    </aside>
+    <section>
+      <header>
+        <h1>Meridian Assistant</h1>
+        <span class="status" id="status"></span>
+      </header>
+      <main id="main"><div class="thread" id="thread"></div></main>
+      <footer>
+        <div class="composer">
+          <button type="button" class="icon" id="attach-btn" title="Attach an image">+</button>
+          <input type="file" id="img" accept="image/*" hidden>
+          <div class="box">
+            <div class="attach" id="attach" hidden><img id="attach-img" alt=""><span id="attach-name"></span><button type="button" id="attach-x">Remove</button></div>
+            <textarea id="q" rows="1" placeholder="Ask about the documents or stock. Enter sends, Shift+Enter is a new line."></textarea>
+          </div>
+          <button type="button" class="icon" id="mic" title="Hold to talk">🎤</button>
+          <button type="button" class="primary" id="send">Send</button>
+        </div>
+        <p class="hint">
+          <label><input type="checkbox" id="voice-reply"> Voice reply: hold the mic, hear the answer</label>
+          <span>Answers come from the ingested documents and the stock tool only.</span>
+        </p>
+      </footer>
+    </section>
     <script id="boot" type="application/json"><%- JSON.stringify(snapshot) %></script>
     <script>
       const api = <%- JSON.stringify(apiPrefix) %>
@@ -56,10 +90,11 @@
       const EXAMPLES = ['What is the P1 first-response SLA?', 'How many ServoDrive X4 are available in EMEA?', 'Which documents do you have?']
 
       // The transcript lives in the page and is sent whole, OpenAI style. The
-      // session id lets the server reuse its KV state between turns.
+      // session id names the server's KV state and its stored copy of the chat.
       const newSession = () => `chat-${Date.now().toString(36)}`
       let chat = { session: newSession(), history: [] }
       let busy = false
+      let attached = null // { file, thumb }
 
       const paintStatus = (snapshot) => {
         $('status').textContent = snapshot.ready ? `tier ${snapshot.tier} · ${snapshot.mode}` : 'loading models…'
@@ -71,11 +106,17 @@
         setTimeout(pollReady, 2000)
       }
 
+      const fail = async (response) => {
+        const body = await response.json().catch(() => ({}))
+        throw new Error(body.error?.message ?? `${response.status} ${response.statusText}`)
+      }
+
+      // ---- transcript -------------------------------------------------------
       const paint = (error) => {
         const thread = $('thread')
         thread.replaceChildren()
         if (!chat.history.length) {
-          thread.append(el('p', 'empty', "Ask about Meridian's documents or stock."))
+          thread.append(el('p', 'empty', "Ask about Meridian's documents or stock, by text, voice or photo."))
           const row = el('div', 'examples')
           for (const q of EXAMPLES) {
             const b = el('button', '', q)
@@ -84,11 +125,27 @@
           }
           thread.append(row)
         }
-        for (const { role, content, citations } of chat.history) {
-          const msg = el('div', `msg ${role}`, content || '…')
-          if (citations?.length) {
+        for (const turn of chat.history) {
+          const msg = el('div', `msg ${turn.role}`)
+          if (turn.thumb) {
+            const img = document.createElement('img')
+            img.src = turn.thumb
+            msg.append(img)
+          }
+          msg.append(document.createTextNode(turn.content || '…'))
+          if (turn.citations?.length) {
             const row = el('div', 'cites')
-            for (const cite of citations) row.append(el('code', '', cite.asOf ? `${cite.file} · as of ${cite.asOf}` : cite.file))
+            for (const cite of turn.citations) row.append(el('code', '', cite.asOf ? `${cite.file} · as of ${cite.asOf}` : cite.file))
+            msg.append(row)
+          }
+          if (turn.role === 'assistant' && turn.content) {
+            const row = el('div', 'actions')
+            const speaker = el('button', '', '🔊')
+            speaker.title = 'Read aloud'
+            speaker.onclick = () => speak(turn.content, speaker)
+            row.append(speaker)
+            if (turn.kind === 'image') row.append(el('span', '', 'photo answer · not from the corpus'))
+            if (turn.kind === 'voice') row.append(el('span', '', 'voice'))
             msg.append(row)
           }
           thread.append(msg)
@@ -97,7 +154,34 @@
         $('main').scrollTop = $('main').scrollHeight
       }
 
-      // OpenAI-style SSE: one JSON per `data:` line, `[DONE]` closes the stream.
+      // ---- sessions ---------------------------------------------------------
+      const loadSessions = async () => {
+        const list = await (await fetch(`${api}/sessions`)).json().catch(() => [])
+        const ul = $('sessions')
+        ul.replaceChildren()
+        for (const s of list) {
+          const li = el('li', s.id === chat.session ? 'active' : '', s.title || s.id)
+          li.title = s.title || s.id
+          li.append(el('small', '', `${new Date(s.updatedAt).toLocaleString()} · ${s.turns} turn${s.turns === 1 ? '' : 's'}`))
+          li.onclick = () => openSession(s.id)
+          ul.append(li)
+        }
+      }
+      const openSession = async (id) => {
+        if (busy) return
+        const stored = await (await fetch(`${api}/sessions/${encodeURIComponent(id)}`)).json()
+        chat = {
+          session: id,
+          history: (stored.turns ?? []).flatMap((turn) => [
+            { role: 'user', content: turn.question, thumb: turn.thumb },
+            { role: 'assistant', content: turn.answer, citations: turn.citations, kind: turn.kind },
+          ]),
+        }
+        paint()
+        loadSessions()
+      }
+
+      // ---- text turn (streamed) -------------------------------------------
       async function* sse(response) {
         const reader = response.body.getReader()
         const decoder = new TextDecoder()
@@ -116,27 +200,40 @@
         }
       }
 
-      async function send() {
-        const content = $('q').value.trim()
-        if (!content || busy) return
+      const begin = (userTurn, replyTurn) => {
         busy = true
         $('send').disabled = true
+        chat.history.push(userTurn, replyTurn)
+        paint()
+      }
+      const end = () => {
+        busy = false
+        $('send').disabled = false
+        loadSessions()
+      }
+      const undo = (error, restore) => {
+        chat.history.splice(-2)
+        if (restore) $('q').value = restore
+        paint(error.message)
+      }
+
+      async function send() {
+        const content = $('q').value.trim()
+        if (busy) return
+        if (attached) return sendImage(content)
+        if (!content) return
         const messages = [...chat.history, { role: 'user', content }].map(({ role, content }) => ({ role, content }))
         const reply = { role: 'assistant', content: '', citations: [] }
-        chat.history.push({ role: 'user', content }, reply)
+        begin({ role: 'user', content }, reply)
         $('q').value = ''
         $('q').style.height = ''
-        paint()
         try {
           const response = await fetch(`${api}/chat/completions`, {
             method: 'POST',
             headers: { 'content-type': 'application/json', 'x-session-id': chat.session },
             body: JSON.stringify({ messages, stream: true }),
           })
-          if (!response.ok) {
-            const body = await response.json().catch(() => ({}))
-            throw new Error(body.error?.message ?? `${response.status} ${response.statusText}`)
-          }
+          if (!response.ok) await fail(response)
           for await (const event of sse(response)) {
             if (event.error) throw new Error(event.error.message)
             const delta = event.choices?.[0]?.delta ?? {}
@@ -145,25 +242,186 @@
             paint()
           }
         } catch (error) {
-          chat.history.splice(-2) // the question goes back to the box to resend
-          $('q').value = content
-          paint(error.message)
+          undo(error, content)
         } finally {
-          busy = false
-          $('send').disabled = false
+          end()
           $('q').focus()
         }
       }
 
-      $('send').onclick = send
-      $('new').onclick = () => { chat = { session: newSession(), history: [] }; paint(); $('q').focus() }
-      $('q').addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); send() }
+      // ---- image turn -------------------------------------------------------
+      const postForm = async (url, fields, file, name) => {
+        const data = new FormData()
+        for (const [key, value] of Object.entries(fields)) data.append(key, value) // fields first: the server reads them before the file
+        data.append('file', file, name)
+        const response = await fetch(url, { method: 'POST', body: data })
+        if (!response.ok) await fail(response)
+        return response.json()
+      }
+      const thumbOf = (file) => new Promise((resolve) => {
+        const img = new Image()
+        img.onload = () => {
+          const scale = Math.min(1, 320 / Math.max(img.width, img.height))
+          const canvas = document.createElement('canvas')
+          canvas.width = Math.round(img.width * scale)
+          canvas.height = Math.round(img.height * scale)
+          canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height)
+          URL.revokeObjectURL(img.src)
+          resolve(canvas.toDataURL('image/jpeg', 0.7))
+        }
+        img.src = URL.createObjectURL(file)
       })
+      const setAttached = (next) => {
+        attached = next
+        $('attach').hidden = !next
+        if (next) { $('attach-img').src = next.thumb; $('attach-name').textContent = next.file.name }
+        $('img').value = ''
+      }
+      async function sendImage(content) {
+        const { file, thumb } = attached
+        const question = content || 'What is in this photo?'
+        const reply = { role: 'assistant', content: '', citations: [], kind: 'image' }
+        begin({ role: 'user', content: question, thumb }, reply)
+        setAttached(null)
+        $('q').value = ''
+        try {
+          const json = await postForm(`${api}/images/ask`, { session: chat.session, question, thumb }, file, file.name)
+          reply.content = json.answer
+          paint()
+        } catch (error) {
+          undo(error, content)
+          setAttached({ file, thumb })
+        } finally {
+          end()
+        }
+      }
+
+      // ---- voice ------------------------------------------------------------
+      const encodeWav = (float32, sampleRate) => {
+        const pcm = new Int16Array(float32.length)
+        for (let i = 0; i < float32.length; i += 1) {
+          const sample = Math.max(-1, Math.min(1, float32[i]))
+          pcm[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff
+        }
+        const buffer = new ArrayBuffer(44 + pcm.byteLength)
+        const view = new DataView(buffer)
+        const ascii = (offset, text) => { for (let i = 0; i < text.length; i += 1) view.setUint8(offset + i, text.charCodeAt(i)) }
+        ascii(0, 'RIFF'); view.setUint32(4, 36 + pcm.byteLength, true); ascii(8, 'WAVE')
+        ascii(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true)
+        view.setUint32(24, sampleRate, true); view.setUint32(28, sampleRate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true)
+        ascii(36, 'data'); view.setUint32(40, pcm.byteLength, true)
+        new Uint8Array(buffer, 44).set(new Uint8Array(pcm.buffer))
+        return new Blob([buffer], { type: 'audio/wav' })
+      }
+      let recording = null
+      const startRecording = async () => {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        const ctx = new AudioContext()
+        const source = ctx.createMediaStreamSource(stream)
+        const processor = ctx.createScriptProcessor(4096, 1, 1)
+        const mute = ctx.createGain()
+        mute.gain.value = 0
+        const chunks = []
+        processor.onaudioprocess = (event) => chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)))
+        source.connect(processor); processor.connect(mute); mute.connect(ctx.destination)
+        recording = {
+          stop: async () => {
+            processor.disconnect(); source.disconnect()
+            for (const track of stream.getTracks()) track.stop()
+            const samples = new Float32Array(chunks.reduce((n, c) => n + c.length, 0))
+            let offset = 0
+            for (const chunk of chunks) { samples.set(chunk, offset); offset += chunk.length }
+            const blob = encodeWav(samples, ctx.sampleRate)
+            await ctx.close()
+            return { blob, seconds: samples.length / ctx.sampleRate }
+          },
+        }
+        $('mic').classList.add('live')
+      }
+      const stopRecording = async () => {
+        if (!recording) return
+        const { stop } = recording
+        recording = null
+        $('mic').classList.remove('live')
+        const { blob, seconds } = await stop()
+        if (seconds < 0.5) return
+        if ($('voice-reply').checked) await voiceTurn(blob)
+        else await dictate(blob)
+      }
+      async function dictate(blob) {
+        $('mic').disabled = true
+        try {
+          const json = await postForm(`${api}/audio/transcriptions`, {}, blob, 'mic.wav')
+          $('q').value = [$('q').value.trim(), json.text].filter(Boolean).join(' ')
+          $('q').focus()
+        } catch (error) {
+          paint(error.message)
+        } finally {
+          $('mic').disabled = false
+        }
+      }
+      // Speech in, spoken answer out: one call to /audio/ask, the server keeps the turn.
+      async function voiceTurn(blob) {
+        if (busy) return
+        const reply = { role: 'assistant', content: '', citations: [], kind: 'voice' }
+        begin({ role: 'user', content: '' }, reply)
+        chat.history.at(-2).content = '🎤 …'
+        paint()
+        try {
+          const json = await postForm(`${api}/audio/ask`, { session: chat.session, language: 'en' }, blob, 'mic.wav')
+          chat.history.at(-2).content = json.question
+          reply.content = json.answer
+          reply.citations = json.citations ?? []
+          paint()
+          if (json.audio?.base64) play(`data:audio/wav;base64,${json.audio.base64}`)
+        } catch (error) {
+          undo(error)
+        } finally {
+          end()
+        }
+      }
+      let player = null
+      const play = (src, button) => {
+        if (player) { player.audio.pause(); player.button?.classList.remove('live'); player = null }
+        const audio = new Audio(src)
+        player = { audio, button }
+        button?.classList.add('live')
+        audio.onended = () => { button?.classList.remove('live'); if (player?.audio === audio) player = null }
+        audio.play().catch(() => {})
+      }
+      async function speak(text, button) {
+        if (player?.button === button) { player.audio.pause(); button.classList.remove('live'); player = null; return }
+        button.disabled = true
+        try {
+          const response = await fetch(`${api}/audio/speech`, {
+            method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ input: text, language: 'en' }),
+          })
+          if (!response.ok) await fail(response)
+          play(URL.createObjectURL(await response.blob()), button)
+        } catch (error) {
+          paint(error.message)
+        } finally {
+          button.disabled = false
+        }
+      }
+
+      // ---- wiring -----------------------------------------------------------
+      $('send').onclick = send
+      $('new').onclick = () => { chat = { session: newSession(), history: [] }; setAttached(null); paint(); loadSessions(); $('q').focus() }
+      $('q').addEventListener('keydown', (event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); send() } })
       $('q').addEventListener('input', () => { const q = $('q'); q.style.height = ''; q.style.height = `${Math.min(q.scrollHeight, 160)}px` })
+      $('attach-btn').onclick = () => $('img').click()
+      $('img').addEventListener('change', async () => {
+        const file = $('img').files[0]
+        if (file) setAttached({ file, thumb: await thumbOf(file) })
+      })
+      $('attach-x').onclick = () => setAttached(null)
+      $('mic').addEventListener('pointerdown', (event) => { event.preventDefault(); if (!recording && !busy) startRecording().catch((error) => paint(error.message)) })
+      for (const type of ['pointerup', 'pointercancel', 'pointerleave']) $('mic').addEventListener(type, () => stopRecording().catch((error) => paint(error.message)))
 
       if (!paintStatus(JSON.parse($('boot').textContent))) pollReady()
       paint()
+      loadSessions()
     </script>
   </body>
 </html>
