@@ -66,6 +66,11 @@ describe('models.json', () => {
     }
   })
 
+  it('gives every chat tier a context size and shares chat weights with vision on S and L', () => {
+    for (const tier of ['S', 'M', 'L']) assert.ok(catalog.roles.chat.models[tier].modelConfig.ctx_size >= 8192, `chat/${tier} has no ctx_size`)
+    for (const tier of ['S', 'L']) assert.equal(catalog.roles.chat.models[tier].file, catalog.roles.vision.models[tier].file)
+  })
+
   it('keeps the middle tier inside the 8 GB budget', () => {
     const resident = Object.values(catalog.roles).filter((role) => role.resident)
     const bytes = resident.reduce((sum, role) => sum + role.models.M.bytes, 0)

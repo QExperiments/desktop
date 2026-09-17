@@ -15,9 +15,9 @@ Retrieval, citations, streaming and tools are in. `npm run corpus:ingest`
 chunks and embeds the corpus into LanceDB; `POST /v1/chat/completions`
 retrieves, grounds the answer, cites the files, streams with
 `stream: true`, and lets the model call `list_documents` and the shipped
-`lookup_stock` tool. Tool calls need tier M or larger (the 2019-laptop
-tier in [ARCHITECTURE.md](ARCHITECTURE.md) D7); tier S answers from the
-corpus only. The runtime provisions weights, picks a tier for the
+`lookup_stock` tool on every tier (S runs Qwen3.5-0.8B, M the 2019-laptop
+tier of [ARCHITECTURE.md](ARCHITECTURE.md) D7 runs Qwen3.5-2B, L
+Qwen3.5-4B). The runtime provisions weights, picks a tier for the
 machine, loads and unloads models, cancels work in flight, transcribes
 speech, speaks answers back, answers questions about a photograph, and
 can run chat, ASR and TTS on a Meridian provider peer. See
@@ -145,7 +145,10 @@ Ctrl+C cancels the download in flight and keeps the partial file; the next
 run resumes it. `--discard` throws the partial away instead.
 
 The tier is measured from total RAM minus a 3.5 GiB OS reserve, so an 8 GB
-laptop serves tier M. `MERIDIAN_TIER=S` forces one for testing. `serve`
+laptop serves tier M and a 6 GB one tier S; below 5 GB `serve` stops with the
+RAM it would need. The chat context is 8k tokens on S, 16k on M and 32k on L;
+a session's whole conversation lives in that window (see req 6.3 below).
+`MERIDIAN_TIER=S` forces one for testing. `serve`
 uses the largest tier whose weights are all present, so a machine handed a
 bundle built elsewhere still starts.
 

@@ -41,7 +41,8 @@ export const createRuntime = ({ log = logger } = {}) => {
 
   const optionsFor = (entry, { delegated = false } = {}) => {
     const spec = catalog.roles[entry.role]
-    const modelConfig = { ...spec.modelConfig }
+    // Role-wide settings first, then what the tier's own model entry adds (ctx_size).
+    const modelConfig = { ...spec.modelConfig, ...spec.models[entry.tier]?.modelConfig }
 
     for (const [key, role] of Object.entries(spec.companions ?? {})) {
       if (delegated) {

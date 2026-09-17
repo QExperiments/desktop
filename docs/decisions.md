@@ -202,3 +202,36 @@ cache still pays inside the tool loop. Cross-turn reuse would need a model
 that routes tools with context in the user turn plus a context budget of
 8k or more; both are tier L questions.
 
+## ADR-011 — Fixed system prompt, excerpts in the user turn, one KV file per session
+
+**Context.** ADR-009 and ADR-010 left the retrieved context in the system
+prompt, which the SDK hashes into the cache file name: every turn with a
+different retrieval opened a new 33 MB file and re-prefilled the whole
+conversation. The N-9 attempt to move the context failed on two counts,
+Qwen3.5-2B stopped calling `lookup_stock`, and the session overflowed a
+4096-token context on turn two.
+
+**Decision.** The system prompt is fixed and names the tools' duties
+explicitly ("the documents never hold stock quantities … call
+lookup_stock"). Retrieved excerpts open the user turn; chunks already
+shown in the session are not repeated but stay in the citations as
+`reused`. A session stores each turn's messages exactly as the model saw
+them (excerpts, tool calls, tool results, answer) and replays them under
+its id, because the SDK counts stored messages under a custom key and sends
+only the tail; the client's own copy of the history is ignored when a
+session is given. Contexts grow to 8k on S, 16k on M and 32k on L, which
+Qwen3.5's hybrid attention affords (12 KB per token on 0.8B and 2B, 32 KB
+on 4B). Tier S moves to Qwen3.5-0.8B and tier L to Qwen3.5-4B so every
+tier has tools and shares its weights with the vision role. The cache
+files of sessions past the newest five are deleted when a new session
+starts.
+
+**Consequences.** Measured on tier M: one cache file for a four-turn
+session, turn two processed 15 prompt tokens against 1776 from the cache,
+first token after 45 ms instead of 935 ms, a stock lookup on turn three and
+a fact from turn one recalled on turn four. Whether tool routing and
+recall hold across the case set is what `evals/` measures; the memory and
+stress categories exist for this layout. A reopened old session pays one
+full prefill. Every answer now returns `usage` and `stats`, and requests
+with `x-eval-run` leave a trace under `data/traces/`.
+

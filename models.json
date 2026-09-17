@@ -12,7 +12,7 @@
     },
     "L": {
       "minBudgetBytes": 10737418240,
-      "label": "workstation or P2P provider box"
+      "label": "workstation or P2P provider box (12 GB RAM and up)"
     }
   },
   "roles": {
@@ -22,31 +22,41 @@
       "required": true,
       "resident": true,
       "modelConfig": {
-        "ctx_size": 4096,
         "tools": true
       },
       "models": {
         "S": {
-          "constant": "QWEN3_600M_INST_Q4",
-          "file": "Qwen3-0.6B-Q4_0.gguf",
-          "bytes": 382156480,
-          "sha256": "33bcc57074ec7b6eada5a90651ee546ec0c2b271002c22baf9f1b2dd1e8f75cb",
-          "https": "https://huggingface.co/unsloth/Qwen3-0.6B-GGUF/resolve/50968a4468ef4233ed78cd7c3de230dd1d61a56b/Qwen3-0.6B-Q4_0.gguf"
+          "constant": "QWEN3_5_0_8B_MULTIMODAL_Q8_0",
+          "file": "Qwen3.5-0.8B-Q8_0.gguf",
+          "bytes": 811843840,
+          "sha256": "0ad885ffd4bb022fc4f0d33a3308fa108ef8613159d3b3a67e23abca056b7a6c",
+          "https": "https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/6ab461498e2023f6e3c1baea90a8f0fe38ab64d0/Qwen3.5-0.8B-Q8_0.gguf",
+          "modelConfig": {
+            "ctx_size": 8192
+          }
         },
         "M": {
           "constant": "QWEN3_5_2B_MULTIMODAL_Q4_K_M",
           "file": "Qwen3.5-2B-Q4_K_M.gguf",
           "bytes": 1280835840,
           "sha256": "aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223",
-          "https": "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/f6d5376be1edb4d416d56da11e5397a961aca8ae/Qwen3.5-2B-Q4_K_M.gguf"
+          "https": "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/f6d5376be1edb4d416d56da11e5397a961aca8ae/Qwen3.5-2B-Q4_K_M.gguf",
+          "modelConfig": {
+            "ctx_size": 16384
+          }
         },
         "L": {
-          "constant": "QWEN3_4B_INST_Q4_K_M",
-          "file": "Qwen3-4B-Q4_K_M.gguf",
-          "bytes": 2497280256,
-          "sha256": "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5"
+          "constant": "QWEN3_5_4B_MULTIMODAL_Q4_K_M",
+          "file": "Qwen3.5-4B-Q4_K_M.gguf",
+          "bytes": 2740937888,
+          "sha256": "00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4",
+          "https": "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/e87f176479d0855a907a41277aca2f8ee7a09523/Qwen3.5-4B-Q4_K_M.gguf",
+          "modelConfig": {
+            "ctx_size": 32768
+          }
         }
-      }
+      },
+      "note": "ctx_size per tier: the whole session stays in the KV cache (see src/chat/answer.js), so the context is the memory bound. Qwen3.5 keeps KV on every fourth layer only (12 KB/token on 0.8B and 2B, 32 KB on 4B)."
     },
     "embed": {
       "addon": "embeddings",
@@ -150,17 +160,17 @@
       "modelType": "llamacpp-completion",
       "required": false,
       "resident": false,
-      "note": "paired with visionProjection; loaded on demand and unloaded after the answer. The image alone takes ~600 tokens of context, so the SDK default of 1024 left ~400 for thinking plus answer and Qwen3.5 stopped mid-thought with an empty reply.",
+      "note": "paired with visionProjection; loaded on demand and unloaded after the answer. Same weights as the chat role on S and L, so a machine that fetched chat has vision too. The image alone takes ~600 tokens of context, so the SDK default of 1024 left ~400 for thinking plus answer and Qwen3.5 stopped mid-thought with an empty reply.",
       "modelConfig": {
         "ctx_size": 4096
       },
       "models": {
         "S": {
-          "constant": "SMOLVLM2_500M_MULTIMODAL_Q8_0",
-          "file": "SmolVLM2-500M-Video-Instruct-Q8_0.gguf",
-          "bytes": 436808704,
-          "sha256": "6f67b8036b2469fcd71728702720c6b51aebd759b78137a8120733b4d66438bc",
-          "https": "https://huggingface.co/ggml-org/SmolVLM2-500M-Video-Instruct-GGUF/resolve/ccd7aae53bcb1997355c2f094959e72b3642ce17/SmolVLM2-500M-Video-Instruct-Q8_0.gguf"
+          "constant": "QWEN3_5_0_8B_MULTIMODAL_Q8_0",
+          "file": "Qwen3.5-0.8B-Q8_0.gguf",
+          "bytes": 811843840,
+          "sha256": "0ad885ffd4bb022fc4f0d33a3308fa108ef8613159d3b3a67e23abca056b7a6c",
+          "https": "https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/6ab461498e2023f6e3c1baea90a8f0fe38ab64d0/Qwen3.5-0.8B-Q8_0.gguf"
         },
         "M": {
           "constant": "QWEN3_5_2B_MULTIMODAL_Q4_K_M",
@@ -188,11 +198,11 @@
       "resident": false,
       "models": {
         "S": {
-          "constant": "MMPROJ_SMOLVLM2_500M_MULTIMODAL_Q8_0",
-          "file": "mmproj-SmolVLM2-500M-Video-Instruct-Q8_0.gguf",
-          "bytes": 108785184,
-          "sha256": "921dc7e259f308e5b027111fa185efcbf33db13f6e35749ddf7f5cdb60ef520b",
-          "https": "https://huggingface.co/ggml-org/SmolVLM2-500M-Video-Instruct-GGUF/resolve/ccd7aae53bcb1997355c2f094959e72b3642ce17/mmproj-SmolVLM2-500M-Video-Instruct-Q8_0.gguf"
+          "constant": "MMPROJ_QWEN3_5_0_8B_MULTIMODAL_Q8_0",
+          "file": "Qwen3.5-0.8B.mmproj-Q8_0.gguf",
+          "bytes": 115923680,
+          "sha256": "5a6b15da0f483b9e320a5b86b787ad1831953dfaa706e2c5d91de830ea70d784",
+          "https": "https://huggingface.co/mradermacher/Qwen3.5-0.8B-GGUF/resolve/9d48fdbc0d8f133716da87ec1d904e5d2c7175a6/Qwen3.5-0.8B.mmproj-Q8_0.gguf"
         },
         "M": {
           "constant": "MMPROJ_QWEN3_5_2B_MULTIMODAL_Q8_0",
