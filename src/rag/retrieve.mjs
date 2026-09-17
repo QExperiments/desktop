@@ -98,42 +98,62 @@ const evalQueries = [
   { query: 'What is the Atlas Cincinnati go-live target per the field ops standup?', doc_id: 'transcripts/call-2026-07-02-field-ops-standup.md' },
 ]
 
-// Runs the evaluation queries and reports recall at k (3, 5, 10) plus the missed references.
+// Runs the evaluation queries and reports, for every k, both recall@k (did the
+// expected file rank inside the top-k) and precision@k (how many of the top-k
+// chunks actually belong to the expected file). Missed references are listed at
+// k=5 when it is one of the requested values.
 export async function evalRecall(kList = [3, 5, 10]) {
   const maxK = Math.max(...kList)
   const perQuery = []
-  const sum = { r3: 0, r5: 0, r10: 0 }
+  const sums = kList.map(() => ({ recall: 0, precision: 0 }))
+
   for (const item of evalQueries) {
     const results = await search(item.query, maxK)
     const files = results.slice(0, maxK).map((r) => r.file)
     const rank = files.indexOf(item.doc_id)
-    const hit = (k) => rank !== -1 && rank < k
     const row = {
       query: item.query,
       doc_id: item.doc_id,
       rank,
       top: files.slice(0, 10),
-      r3: hit(3) ? 1 : 0,
-      r5: hit(5) ? 1 : 0,
-      r10: hit(10) ? 1 : 0,
+      k: {},
     }
+
+    kList.forEach((k, i) => {
+      const hit = rank !== -1 && rank < k
+      const relevant = files.slice(0, k).filter((f) => f === item.doc_id).length
+      row.k[k] = {
+        recall: hit ? 1 : 0,
+        precision: Number((relevant / k).toFixed(4)),
+      }
+      sums[i].recall += row.k[k].recall
+      sums[i].precision += row.k[k].precision
+    })
+
     perQuery.push(row)
-    sum.r3 += row.r3
-    sum.r5 += row.r5
-    sum.r10 += row.r10
   }
+
   const n = evalQueries.length
   const report = {
     queries: n,
-    recallAt3: Number((sum.r3 / n).toFixed(4)),
-    recallAt5: Number((sum.r5 / n).toFixed(4)),
-    recallAt10: Number((sum.r10 / n).toFixed(4)),
-    missesAt5: perQuery.filter((r) => r.r5 === 0).map((r) => r.doc_id),
+    k: {},
   }
-  console.log(`\nEval - ${n} queries | recall@3=${report.recallAt3} recall@5=${report.recallAt5} recall@10=${report.recallAt10}\n`)
+  kList.forEach((k, i) => {
+    report.k[k] = {
+      recall: Number((sums[i].recall / n).toFixed(4)),
+      precision: Number((sums[i].precision / n).toFixed(4)),
+    }
+  })
+  report.missesAt5 = kList.includes(5)
+    ? perQuery.filter((r) => r.k[5].recall === 0).map((r) => r.doc_id)
+    : []
+
+  const metrics = kList.map((k) => `recall@${k}=${report.k[k].recall} precision@${k}=${report.k[k].precision}`).join(' ')
+  console.log(`\nEval - ${n} queries | ${metrics}\n`)
   perQuery.forEach((r, i) => {
     const pos = r.rank === -1 ? 'NOT-FOUND' : `rank=${r.rank + 1}`
-    console.log(`${String(i + 1).padStart(2)}. ${pos} | hit3=${r.r3} hit5=${r.r5} hit10=${r.r10} | ref=${r.doc_id}`)
+    const parts = kList.map((k) => `r${k}=${r.k[k].recall}/p${k}=${r.k[k].precision}`).join(' ')
+    console.log(`${String(i + 1).padStart(2)}. ${pos} | ${parts} | ref=${r.doc_id}`)
     console.log(`    q: ${r.query}`)
     console.log(`    top: ${r.top.join(', ')}`)
     console.log()

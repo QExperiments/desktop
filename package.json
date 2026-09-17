@@ -13,6 +13,7 @@
     "provide": "node src/p2p/provider.js",
     "models:fetch": "node scripts/models-fetch.js",
     "corpus:ingest": "node scripts/corpus-ingest.js",
+    "eval:retrieval": "node scripts/eval-retrieval.js",
     "test": "node --test 'test/unit/**/*.test.js'",
     "test:e2e": "node --test --test-timeout=1800000 'test/e2e/**/*.test.js'",
     "eval": "node scripts/stub.js eval",
