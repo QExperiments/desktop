@@ -12,13 +12,10 @@ export const registerUi = async (app, runtime) => {
     viewExt: 'ejs',
   })
 
-  // Test console for the APIs this build already exposes. Not the product UI.
-  const page = async (_request, reply) =>
-    reply.view('index', {
-      apiPrefix: config.apiPrefix,
-      snapshot: runtime.snapshot(),
-    })
+  const render = (name) => async (_request, reply) =>
+    reply.view(name, { apiPrefix: config.apiPrefix, snapshot: runtime.snapshot() })
 
-  app.get('/', page)
-  app.get('/ui', page)
+  // `/` is the chat; `/ui` keeps the test console for the other APIs.
+  app.get('/', render('chat'))
+  app.get('/ui', render('index'))
 }
