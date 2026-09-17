@@ -8,7 +8,8 @@ const SYSTEM = [
   'You are Meridian Components\' internal assistant.',
   'Answer in the language of the question, in at most three sentences.',
   'If you do not have the answer, say so plainly instead of guessing a number.',
-  'Call lookup_stock for stock, availability or lead time; call list_documents to list the corpus files.',
+  'Tools: lookup_stock for stock, availability or lead time; list_documents for the list of corpus files.',
+  'Call a tool, read its result, then answer the user in plain text. Repeat a call only with different arguments.',
   // Qwen3 and Qwen3.5 read this as "skip the reasoning block". Models that do
   // not recognise it ignore it, and captureThinking catches them instead.
   '/no_think',
@@ -16,25 +17,14 @@ const SYSTEM = [
 
 // How many retrieved chunks are fed into the prompt as context.
 const CHAT_TOPK = 3
-// How many tool rounds one question may take before the model must answer.
+// Hard stop for the tool loop, whatever the per-tool limits add up to.
 const MAX_TOOL_ROUNDS = 3
-const NO_ANSWER = 'I could not put that into an answer. Please ask again; for stock, name the exact SKU and region.'
 
-// When the model never writes an answer, the last tool result is shown as is:
-// tool facts, no guessing.
-const plain = (name, result) => {
-  if (name === 'lookup_stock' && result?.matches?.length) {
-    const rows = result.matches.map((m) =>
-      `${m.sku} ${m.name}, ${m.region}: ${m.available} available, lead time ${m.leadTimeDays} days, ${m.status}`)
-    return `Stock as of ${result.asOf}: ${rows.join('; ')}.`
-  }
-  if (name === 'lookup_stock') {
-    const similar = result?.suggestions?.map((s) => s.sku) ?? []
-    return `No stock record matched${similar.length ? `; similar SKUs: ${similar.join(', ')}` : ''}.`
-  }
-  if (name === 'list_documents' && result?.files) return `Documents: ${result.files.join(', ')}.`
-  return ''
-}
+// Every tool result goes back with this line. A small model otherwise reads
+// the result as a cue to call the tool again instead of writing the answer.
+const afterTool = (result) => `${JSON.stringify(result)}\nNow answer the user in plain text from this result.`
+
+const toolByName = Object.fromEntries(tools.map((tool) => [tool.name, tool]))
 
 // Builds a system-style context block from the retrieved chunks so the model
 // grounds its answer in them instead of inventing facts.
@@ -77,19 +67,16 @@ export const answer = async (runtime, { question, prior = [], session, onDelta, 
   // Agent loop: each round is one completion. A round that asks for tools gets
   // their results appended as `tool` messages and the next round starts; the
   // loop ends on the first round with no tool calls or at MAX_TOOL_ROUNDS.
-  // A small model can ask for the same tool call again and again. A repeat is
-  // not run twice: the model gets a note pointing at the earlier result, and
-  // MAX_TOOL_ROUNDS ends the loop with a plain sentence instead of an empty answer.
-  // Tools stay declared in every round: without them the model still writes
-  // tool-call markup, which then streams to the user as text.
-  const seen = new Set()
-  let fallback = ''
+  // Each tool allows maxTries calls per question; past that the model gets an
+  // error instead of a result. Tools stay declared in every round: without
+  // them the model still writes tool-call markup, which then streams as text.
+  const tries = {}
   for (let round = 0; ; round++) {
     const { run, settle } = await runtime.completion({
       history,
       tools,
       kvCache,
-      // Reasoning models wrap their scratchpad in  think>. Captured separately it
+      // Reasoning models wrap their scratchpad in <think>. Captured separately it
       // stays out of contentText, so it is never read aloud or shown as an answer.
       captureThinking: true,
       generationParams: { temp: 0.2, predict: 320, ...params.generationParams },
@@ -102,18 +89,17 @@ export const answer = async (runtime, { question, prior = [], session, onDelta, 
       const calls = (await final.toolCalls) ?? []
       if (calls.length === 0 || round >= MAX_TOOL_ROUNDS) {
         // Shape fixed by req 5.2 of the eval protocol, so callers can rely on it.
-        return { text: (final.contentText ?? '').trim() || fallback || NO_ANSWER, citations }
+        return { text: (final.contentText ?? '').trim(), citations }
       }
 
       history.push({ role: 'assistant', content: final.raw?.fullText ?? '' })
       for (const call of calls) {
-        const key = `${call.name}:${JSON.stringify(call.arguments ?? null)}`
-        const result = seen.has(key)
-          ? { note: 'Same call as before. Answer the user in plain text from the earlier result.' }
-          : call.invoke ? await call.invoke() : { error: `unknown tool ${call.name}` }
-        if (!seen.has(key)) fallback = plain(call.name, result) || fallback
-        seen.add(key)
-        history.push({ role: 'tool', content: JSON.stringify(result) })
+        const tool = toolByName[call.name]
+        tries[call.name] = (tries[call.name] ?? 0) + 1
+        const result = !tool ? { error: `unknown tool ${call.name}` }
+          : tries[call.name] > tool.maxTries ? { error: `${call.name} was already called for this question; use its earlier result` }
+          : await call.invoke()
+        history.push({ role: 'tool', content: afterTool(result) })
         const cite = toolCitation[call.name]
         if (cite && !citations.some((c) => c.file === cite.file)) citations.push(cite)
       }
