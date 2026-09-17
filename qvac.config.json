@@ -6,5 +6,5 @@
     "@qvac/sdk/tts-ggml/plugin"
   ],
   "loggerConsoleOutput": true,
-  "loggerLevel": "info"
+  "loggerLevel": "warn"
 }

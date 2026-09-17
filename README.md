@@ -164,7 +164,8 @@ bundle built elsewhere still starts.
 | `data/serve.pid` | the running server's PID |
 
 Nothing else. Logs carry request metadata only: prompts and corpus text
-are never logged. `serve` opens no outbound connection.
+are never logged (`qvac.config.json` keeps the SDK's own log at `warn`, which
+is where its prompt echo would otherwise appear). `serve` opens no outbound connection.
 
 ## Build
 
