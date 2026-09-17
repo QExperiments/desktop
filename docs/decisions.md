@@ -184,3 +184,21 @@ Two follow-ups, not taken: wipe `meridian-*` caches at server start
 (sessions do not outlive the process anyway), and give keyless requests
 an ephemeral key deleted after the answer so every request gets the
 in-question reuse.
+
+**Addendum (N-9, 2026-09-17): why the context stays in the system prompt.**
+The system prompt is rebuilt every turn with the retrieved chunks, and the
+SDK names the cache file by session key plus a hash of the system prompt, so
+each turn whose retrieval differs opens a new file: one browser chat left
+nine 33 MB files. The obvious fix was tried, a fixed system prompt with the
+context inside the user turn. It did what the cache wants: one file per
+session, turns two and three sent one message each, `REUSING cache` in the
+log. It failed on two other counts. Qwen3.5-2B stopped calling
+`lookup_stock` when the context sat in the user turn (it reasoned that the
+documents hold no stock and answered so), and every turn's context stays in
+the reused KV state, so the second turn of a session overflowed `ctx_size`
+4096 at 4246 tokens. Per-turn re-prefill is therefore the layout kept:
+turns stay bounded and independent, tool routing on tier M holds, and the
+cache still pays inside the tool loop. Cross-turn reuse would need a model
+that routes tools with context in the user turn plus a context budget of
+8k or more; both are tier L questions.
+
