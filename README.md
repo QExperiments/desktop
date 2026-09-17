@@ -64,17 +64,25 @@ box. Embeddings and vision stay on this laptop so the corpus and photos
 never leave. Eval never starts a provider: `npm run serve` with no
 `QVAC_PROVIDER_PUBLIC_KEY` is local-only.
 
-On the strong machine:
+On the strong machine, optionally lock it to known laptops (I.1.1).
+Each laptop gets a stable identity from `QVAC_HYPERSWARM_SEED`;
+`npm run identity` prints the public key to put on the allow-list:
 
 ```bash
-npm run provide
+QVAC_HYPERSWARM_SEED=<64 hex chars> npm run identity
+QVAC_FIREWALL_MODE=allow QVAC_FIREWALL_PUBLIC_KEYS=<laptop-key>[,<another>] npm run provide
+# same thing as arguments:
+npm run provide -- <provider-seed> <laptop-key>
 ```
 
 It prints a public key. On the field laptop, with that key in the
 environment, `npm run serve` heartbeats the peer and loads chat (and, on
-first use, ASR and TTS) with `delegate`. `GET /health` reports
-`mode: "delegated"` when chat is on the peer; each loaded model also
-has a `delegated` flag. If the peer is down, everything loads locally.
+first use, ASR and TTS) with `delegate`. Heartbeats continue while the
+server runs (I.1.2). If the provider drops mid-session, delegated models
+fail over to local weights; when it comes back they reconnect with a
+fresh DHT socket (I.1.3). `GET /health` reports `mode: "delegated"` when
+chat is on the peer, plus `peerOnline` and a `delegated` flag per model.
+If the peer is down at start, everything loads locally.
 
 `POST /v1/audio/transcriptions`, `/v1/audio/speech` and `/v1/audio/ask`
 all go through that same `acquire()`, so they pick up the peer without
@@ -84,6 +92,11 @@ retrieval; when that route lands it will use the same chat model.
 `QVAC_FORCE_LOCAL=1` skips the peer even when a key is set.
 `QVAC_ASSUME_STRONG_PEER=1` asks the peer for L-tier weights instead of
 this laptop's tier.
+`QVAC_PEER_HEARTBEAT_INTERVAL_MS=0` keeps the startup probe but disables
+ongoing checks.
+
+How to prove it on two processes (firewall, heartbeat, kill the
+provider, bring it back): [docs/p2p-test.md](docs/p2p-test.md).
 
 ## Requirements
 
@@ -161,12 +174,16 @@ npm test          # unit; no model weights, no native addons, runs in CI
 npm run test:e2e  # needs MERIDIAN_E2E=1 and a completed models:fetch
 ```
 
+P2P live checks (two processes, real DHT) are not in CI. Walk through
+[docs/p2p-test.md](docs/p2p-test.md).
+
 ## Repository
 
 | Path | What |
 | --- | --- |
 | `src/runtime/` | the only consumer code that imports `@qvac/sdk` |
-| `src/p2p/provider.js` | `npm run provide` on the strong box; no HTTP |
+| `src/p2p/provider.js` | `npm run provide` on the strong box; optional public-key firewall |
+| `docs/p2p-test.md` | how to test firewall, heartbeat, failover |
 | `src/http/` | OpenAI-compatible surface; talks to the runtime, never the SDK |
 | `views/` | EJS test console at `GET /` |
 | `src/chat/answer.js` | the one seam a question passes through to become an answer |

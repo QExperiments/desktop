@@ -136,7 +136,8 @@
         Local means this process is not delegated — the model runs locally.
         To send chat, ASR and TTS to a peer, run <code>npm run provide</code> on the other machine,
         then start this serve with <code>QVAC_PROVIDER_PUBLIC_KEY</code> set to the key it prints
-        and without <code>QVAC_FORCE_LOCAL=1</code>. Embeddings and vision stay on this machine.
+        and without <code>QVAC_FORCE_LOCAL=1</code>. If the peer drops, this box falls back locally
+        and reconnects when the provider returns. Embeddings and vision stay on this machine.
       </p>
       <div class="pills" id="pills"></div>
       <div class="row">
@@ -251,6 +252,7 @@
         }
         add('ready', snapshot.ready === true, snapshot.ready)
         add('mode', snapshot.mode ?? '—')
+        add('peer', snapshot.peerOnline === true, snapshot.peerOnline)
         add('tier', snapshot.tier ?? '—')
         add('delegated', snapshot.isDelegated === true, snapshot.isDelegated)
         for (const model of snapshot.models ?? []) {
