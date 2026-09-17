@@ -22,6 +22,9 @@ export const summarize = ({ startedAt, retrievalMs = 0, rounds = [], rss = null,
     return tokensPerSecond > 0 ? total + generatedTokens / tokensPerSecond : total
   }, 0)
   const toolCalls = rounds.flatMap((round) => round.toolCalls ?? [])
+  // usage sums the rounds like separate API calls would; the context the
+  // model actually held is the largest single round, processed plus cached.
+  const contextTokens = rounds.reduce((max, round) => Math.max(max, (round.stats?.promptTokens ?? 0) + (round.stats?.cacheTokens ?? 0)), 0)
   const ttft = rounds[0]?.stats?.timeToFirstToken ?? null
   const fresh = rounds[0]?.stats?.promptTokens ?? 0
 
@@ -34,6 +37,7 @@ export const summarize = ({ startedAt, retrievalMs = 0, rounds = [], rss = null,
     },
     stats: {
       prefill_tokens: processed,
+      context_tokens: contextTokens,
       ttft_ms: round1(ttft),
       tps: decodeSeconds > 0 ? round1(generated / decodeSeconds) : null,
       prefill_tps: ttft > 0 ? round1(fresh / (ttft / 1000), 0) : null,

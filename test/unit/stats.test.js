@@ -17,6 +17,8 @@ test('sums tokens over the tool loop and takes ttft from the first round', () =>
   // processed 900 + 1000 plus cached 700 + 940 are all prompt tokens to OpenAI
   assert.deepEqual(usage, { prompt_tokens: 3540, completion_tokens: 100, total_tokens: 3640, prompt_tokens_details: { cached_tokens: 1640 } })
   assert.equal(stats.prefill_tokens, 1900)
+  // the second round held 1000 processed + 940 cached tokens
+  assert.equal(stats.context_tokens, 1940)
   assert.equal(stats.ttft_ms, 400)
   assert.equal(stats.rounds, 2)
   assert.equal(stats.total_ms, 3000)
