@@ -21,6 +21,7 @@
       "modelType": "llamacpp-completion",
       "required": true,
       "resident": true,
+      "modelConfig": { "ctx_size": 4096 },
       "models": {
         "S": {
           "constant": "QWEN3_600M_INST_Q4",
