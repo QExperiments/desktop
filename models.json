@@ -3,8 +3,8 @@
   "note": "Owned by M-02. Tiers are picked from total RAM minus osReserveBytes; see src/runtime/capability.js.",
   "tiers": {
     "S": {
-      "minBudgetBytes": 0,
-      "label": "constrained device: load one model at a time"
+      "minBudgetBytes": 1610612736,
+      "label": "constrained device: 6 GB RAM, one small model at a time"
     },
     "M": {
       "minBudgetBytes": 4294967296,
@@ -21,7 +21,10 @@
       "modelType": "llamacpp-completion",
       "required": true,
       "resident": true,
-      "modelConfig": { "ctx_size": 4096, "tools": true },
+      "modelConfig": {
+        "ctx_size": 4096,
+        "tools": true
+      },
       "models": {
         "S": {
           "constant": "QWEN3_600M_INST_Q4",
@@ -148,7 +151,9 @@
       "required": false,
       "resident": false,
       "note": "paired with visionProjection; loaded on demand and unloaded after the answer. The image alone takes ~600 tokens of context, so the SDK default of 1024 left ~400 for thinking plus answer and Qwen3.5 stopped mid-thought with an empty reply.",
-      "modelConfig": { "ctx_size": 4096 },
+      "modelConfig": {
+        "ctx_size": 4096
+      },
       "models": {
         "S": {
           "constant": "SMOLVLM2_500M_MULTIMODAL_Q8_0",

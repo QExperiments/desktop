@@ -31,8 +31,15 @@ export const selectTier = (resources, { tiers, osReserveBytes, override = '' } =
 
   if (budgetBytes === null) return { tier: 'S', budgetBytes, hardware, reason: 'total RAM unknown, assuming the smallest tier' }
 
-  const tier = TIERS.find((name) => budgetBytes >= tiers[name].minBudgetBytes) ?? 'S'
   const gib = (n) => `${(n / 1024 ** 3).toFixed(1)} GiB`
+  const tier = TIERS.find((name) => budgetBytes >= tiers[name].minBudgetBytes) ?? null
+
+  // Below the smallest tier's budget the weights and context would not fit;
+  // say so instead of loading and failing on an allocation or swapping.
+  if (tier === null) {
+    const needed = tiers.S.minBudgetBytes + osReserveBytes
+    return { tier, budgetBytes, hardware, reason: `${gib(hardware.totalBytes)} RAM is below the ${gib(needed)} the smallest tier needs` }
+  }
 
   return {
     tier,

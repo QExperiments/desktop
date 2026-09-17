@@ -118,6 +118,7 @@ const fetchAll = async () => {
   const chosen = flags.tier
     ? { tier: flags.tier.toUpperCase(), reason: 'passed with --tier' }
     : selectTier(await sdk.getSystemResources({ sample: true }), { ...catalog, override: config.tierOverride })
+  if (!chosen.tier) throw new Error(`${chosen.reason}; pass --tier S to fetch the smallest set anyway`)
 
   const wanted = flags.role ?? []
   const targets = targetsFor(chosen.tier, { optional: flags.all || wanted.length > 0 })

@@ -275,6 +275,7 @@ export const createRuntime = ({ log = logger } = {}) => {
   const start = async () => {
     const resources = await sdk.getSystemResources({ sample: true })
     const chosen = selectTier(resources, { ...catalog, override: config.tierOverride })
+    if (!chosen.tier) throw new Error(`${chosen.reason}; set MERIDIAN_TIER=S to try anyway`)
 
     manifest = await readManifest(config.manifestPath)
     if (!manifest) throw new Error(`no ${config.manifestPath} — ${FETCH_HINT}`)

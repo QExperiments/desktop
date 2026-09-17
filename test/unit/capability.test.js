@@ -27,8 +27,14 @@ describe('selectTier', () => {
     assert.equal(selectTier(device({ gib: 32, drivers: { cuda: true }, unifiedMemory: false }), catalog).tier, 'L')
   })
 
-  it('drops a 4 GB machine to the small tier', () => {
-    assert.equal(selectTier(device({ gib: 4 }), catalog).tier, 'S')
+  it('drops a 6 GB machine to the small tier', () => {
+    assert.equal(selectTier(device({ gib: 6 }), catalog).tier, 'S')
+  })
+
+  it('refuses a 4 GB machine with the RAM it would need', () => {
+    const { tier, reason } = selectTier(device({ gib: 4 }), catalog)
+    assert.equal(tier, null)
+    assert.match(reason, /4\.0 GiB RAM is below the 5\.0 GiB/)
   })
 
   it('falls back to CPU when no GPU driver is usable', () => {
