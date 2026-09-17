@@ -56,7 +56,7 @@
           }
         }
       },
-      "note": "ctx_size per tier: the whole session stays in the KV cache (see src/chat/answer.js), so the context is the memory bound. Qwen3.5 keeps KV on every fourth layer only (12 KB/token on 0.8B and 2B, 32 KB on 4B)."
+      "note": "ctx_size per tier: the whole session stays in the KV cache (see src/chat/answer.js), so the context is the memory bound. Qwen3.5 keeps KV on every fourth layer only (12 KB/token on 0.8B and 2B, 32 KB on 4B). Thinking stays on: reasoning_budget 0 halves latency on the 2B but it then stops calling lookup_stock (1 of 6 stock questions against 5 of 6), and any other budget value is not enforced by the addon."
     },
     "embed": {
       "addon": "embeddings",

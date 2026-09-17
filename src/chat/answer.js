@@ -17,7 +17,7 @@ export const SYSTEM = [
   'A user message may open with excerpts from the company documents. Ground your answer in them and in earlier excerpts of this conversation; do not invent facts beyond them.',
   'The documents never hold stock quantities, availability or lead times; call lookup_stock for those.',
   'Tools: lookup_stock for stock, availability or lead time; list_documents for the list of corpus files.',
-  'Call a tool, read its result, then answer the user in plain text. Repeat a call only with different arguments.',
+  'Call a tool, read its result, then answer the user in plain text. Repeat a call only with different arguments. Never tell the user to call a tool; call it yourself.',
   'If you do not have the answer, say so plainly instead of guessing a number.',
   // Qwen3 and Qwen3.5 read this as "skip the reasoning block". Models that do
   // not recognise it ignore it, and captureThinking catches them instead.
