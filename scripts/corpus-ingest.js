@@ -1,3 +1,21 @@
-// Stage 2 (issues N-02, M-03) replaces this with the real ingest pipeline.
-// It exits 0 so the qvac-eval.json `setup` command already works end to end.
-console.log('corpus:ingest: no corpus pipeline in this stage, nothing to do')
+// Real corpus ingest (Stage 2). Runs the RAG pipeline from src/rag/ingest.mjs:
+// parses the corpus, chunks it, embeds and stores it in LanceDB, then builds
+// the full-text index. Use `-- --force` to drop and rebuild the whole
+// collection (required after changing chunk config).
+//
+// Prerequisites: `npm run models:fetch` so the embedding model is provisioned.
+import { parseArgs } from 'node:util'
+import { ingest } from '../src/rag/ingest.mjs'
+
+const { values } = parseArgs({
+  options: {
+    force: { type: 'boolean', default: false },
+  },
+})
+
+try {
+  await ingest({ force: values.force })
+} catch (error) {
+  console.error(`corpus:ingest failed: ${error.message}`)
+  process.exitCode = 1
+}

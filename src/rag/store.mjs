@@ -19,10 +19,13 @@ export const config = {
   tableName: process.env.LANCE_TABLE || 'meridian_corpus',
   embeddingModelId: process.env.EMBEDDING_MODEL || 'EMBEDDINGGEMMA_300M_Q8_0',
   chunkOpts: {
-    chunkSize: Number(process.env.CHUNK_SIZE || 1024),
-    chunkOverlap: Number(process.env.CHUNK_OVERLAP || 64),
+    // Small chunks so a weak model (tier S, Qwen3-0.6B) can consume them; with
+    // 'character' split, chunkSize is in characters. 112/24 measured best on the
+    // eval recall/precision set. Overridable via env.
+    chunkSize: Number(process.env.CHUNK_SIZE || 112),
+    chunkOverlap: Number(process.env.CHUNK_OVERLAP || 24),
     chunkStrategy: process.env.CHUNK_STRATEGY || 'paragraph',
-    splitStrategy: process.env.CHUNK_SPLIT || 'sentence',
+    splitStrategy: process.env.CHUNK_SPLIT || 'character',
   },
   topK: Number(process.env.TOP_K || 5),
   addBatchSize: Number(process.env.ADD_BATCH_SIZE || 128),
