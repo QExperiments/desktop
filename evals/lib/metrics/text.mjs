@@ -73,8 +73,10 @@ export const langMatch = (query, text) => {
 
 export const empty = (text) => (text ?? '').trim() === ''
 
-// Markup or prompt text that should never reach a person.
-const LEAKS = [/<think>/i, /<tool_call>/i, /\{"name":/, /\/no_think/, /You are Meridian/, /\[\d+\] source:/, /<\|im_(start|end)\|>/]
+// Markup or prompt text that should never reach a person. The closing
+// </think> counts too: 2026-09-18 three multiquery answers carried it with a
+// second draft of the answer after it, while the opening tag had been captured.
+const LEAKS = [/<\/?think>/i, /<tool_call>/i, /\{"name":/, /\/no_think/, /You are Meridian/, /\[\d+\] source:/, /<\|im_(start|end)\|>/]
 export const leak = (text) => LEAKS.some((pattern) => pattern.test(text ?? ''))
 
 // The answer declines: says the documents or data do not hold it. The

@@ -10,6 +10,18 @@ const run = promisify(execFile)
 // runner is in. One `sample()` interface, one adapter per platform, one OS
 // command per source per tick plus a regex. Where a platform has no built-in
 // source the field is null; nothing is installed.
+//
+// Two memory numbers per process tree, measured 2026-09-18 on the dev Mac
+// with tier M loaded (bare worker: rss 2.03 GB, footprint 0.53 GB):
+// - rss: resident pages, weights included. llama.cpp mmaps the GGUF and
+//   Metal reads those file-backed pages in place, so they are resident and
+//   counted here. This is what the model needs in RAM to run at full speed.
+// - footprint_bare: what the worker owns outright (KV cache, compute
+//   buffers, runtime), without the clean file-backed weights. Activity
+//   Monitor's Memory column shows this, so it undercounts a running model;
+//   its slope over a session is the KV cache growing.
+
+const base = (comm) => String(comm).split(/[\\/]/).pop()
 
 // Process table as { pid, ppid, rss (bytes), cpu (%), comm } rows.
 const psTable = async () => {
@@ -31,12 +43,16 @@ const treeOf = (rows, root) => {
   return self ? [self, ...tree] : tree
 }
 
+const isBare = (row) => /^bare/i.test(base(row.comm))
+
 const summarizeTree = (rows) => ({
   rss_tree: rows.reduce((sum, row) => sum + row.rss, 0),
-  rss_node: rows.filter((row) => /node/i.test(row.comm)).reduce((sum, row) => sum + row.rss, 0),
-  rss_bare: rows.filter((row) => /bare/i.test(row.comm)).reduce((sum, row) => sum + row.rss, 0),
+  rss_node: rows.filter((row) => /^node/i.test(base(row.comm))).reduce((sum, row) => sum + row.rss, 0),
+  rss_bare: rows.filter(isBare).reduce((sum, row) => sum + row.rss, 0),
   cpu: Number(rows.reduce((sum, row) => sum + row.cpu, 0).toFixed(1)),
 })
+
+const safe = (promise, fallback) => promise.catch(() => fallback)
 
 const darwin = {
   async system() {
@@ -51,7 +67,20 @@ const darwin = {
     const values = [...stdout.matchAll(/"Device Utilization %"=(\d+)/g)].map((m) => Number(m[1]))
     return values.length ? Math.max(...values) : null
   },
-  tree: async (pid) => summarizeTree(treeOf(await psTable(), pid)),
+  // `footprint -p` prints phys_footprint in KB/MB/GB; about 35 ms per call.
+  async footprint(pids) {
+    let total = 0
+    for (const pid of pids) {
+      const { stdout } = await run('footprint', ['-p', String(pid)])
+      const m = stdout.match(/phys_footprint:\s+([\d.]+)\s*(KB|MB|GB)/)
+      if (m) total += Number(m[1]) * { KB: 1024, MB: 1024 ** 2, GB: 1024 ** 3 }[m[2]]
+    }
+    return pids.length ? total : null
+  },
+  async tree(pid) {
+    const rows = treeOf(await psTable(), pid)
+    return { ...summarizeTree(rows), footprint_bare: await safe(darwin.footprint(rows.filter(isBare).map((row) => row.pid)), null) }
+  },
 }
 
 const linux = {
@@ -68,7 +97,21 @@ const linux = {
     }
     return null
   },
-  tree: async (pid) => summarizeTree(treeOf(await psTable(), pid)),
+  // Anonymous plus shared-memory resident pages: the same "owned, not the
+  // mmap'd weights" cut that phys_footprint gives on macOS.
+  async footprint(pids) {
+    let total = 0
+    for (const pid of pids) {
+      const text = await readFile(`/proc/${pid}/status`, 'utf8')
+      const kib = (name) => Number(text.match(new RegExp(`${name}:\\s+(\\d+)`))?.[1] ?? 0)
+      total += (kib('RssAnon') + kib('RssShmem')) * 1024
+    }
+    return pids.length ? total : null
+  },
+  async tree(pid) {
+    const rows = treeOf(await psTable(), pid)
+    return { ...summarizeTree(rows), footprint_bare: await safe(linux.footprint(rows.filter(isBare).map((row) => row.pid)), null) }
+  },
 }
 
 const win32 = {
@@ -83,15 +126,15 @@ const win32 = {
     const { stdout } = await run('powershell', ['-NoProfile', '-Command', script])
     const data = JSON.parse(stdout)
     const rows = (Array.isArray(data.procs) ? data.procs : [data.procs]).map((p) => ({ pid: p.IDProcess, ppid: p.CreatingProcessID, rss: Number(p.WorkingSetPrivate), cpu: Number(p.PercentProcessorTime), comm: p.Name }))
+    const tree = summarizeTree(treeOf(rows, pid))
     return {
-      tree: summarizeTree(treeOf(rows, pid)),
+      // WorkingSetPrivate already leaves out mapped files, so it is the footprint.
+      tree: { ...tree, footprint_bare: tree.rss_bare },
       system: (Number(data.os.TotalVisibleMemorySize) - Number(data.os.FreePhysicalMemory)) * 1024,
       gpu: data.gpu === null || data.gpu === undefined ? null : Math.min(100, Number(data.gpu)),
     }
   },
 }
-
-const safe = (promise, fallback) => promise.catch(() => fallback)
 
 export const sample = async (pid) => {
   if (process.platform === 'win32') {

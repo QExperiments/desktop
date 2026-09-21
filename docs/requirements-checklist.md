@@ -25,7 +25,9 @@ that are not code.
   *Three: `--source registry` (QVAC registry), `--source https` (HuggingFace
   mirror, resumable), `--source fs --from-dir` (MDM-provisioned directory).
   `pear://` is available in the SDK but unused — see the note under Req #6.2.
-  Weights are fetched at setup time, never bundled.*
+  Weights are fetched at setup time, never bundled. `npm run models:list
+  [--refresh]` and `GET /v1/models/catalog` show every role and tier with
+  provisioned / in-registry / fits-budget status; the server never downloads.*
 - [x] **1.3** Lifecycle `loadModel` → inference → `unloadModel` → `close`.
   *`src/runtime/index.js`; e2e test `loads the resident models and reports the
   tier it serves`.*
@@ -64,7 +66,8 @@ that are not code.
   Rows are `{ id, vector, text, ...metadata }` built through `ragChunk()` and
   `embed()`, so the vector width comes from the embedding model itself rather
   than a hard-coded number. Search is hybrid: cosine plus a full-text index,
-  the two rankings fused.*
+  the two rankings fused; `MERIDIAN_FUSION=cosine|bm25` keeps one leg for the
+  eval's A/B (ADR-012), the default stays `rrf`.*
 - [x] **2.4** Streaming generation.
   *`stream: true` on `/v1/chat/completions` returns OpenAI SSE: a role chunk,
   one chunk per token, a final chunk with `citations` and `grounded`, then
@@ -237,6 +240,7 @@ start before the quality debt under "Where this stands" is paid.
 - [ ] **I.2** Simultaneous completion runs via continuous batching, merged event
   stream, per-prompt cancellation
   - [ ] **I.2.1** Report batch-level throughput versus sequential completions
+    — embed path measured 2026-09-20 (`evals/embed-batch.mjs`, `evals/results/embed-batch-2026-09-20/report.md`): one array `embed()` is ×6 faster than sequential calls on 133 short queries (×1.7 on CPU), ×1.1 on 34 long chunks; concurrent single calls are rejected by the engine (one job at a time); `cancel({ requestId })` stops an array request in ~12 ms. `batchCompletion` for the LLM still to measure.
 - [ ] **I.3** TurboQuant KV-cache quantization at `loadModel`, combined with the
   session `kvCache` path; note the backend in the report
 - [ ] **I.4** Drive one capability through the native C++ addon directly,

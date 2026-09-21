@@ -13,7 +13,10 @@
       aside .top { padding: 0.75rem; border-bottom: 1px solid var(--line); }
       aside .top button { width: 100%; }
       aside ul { list-style: none; margin: 0; padding: 0.5rem; overflow-y: auto; flex: 1; }
-      aside li { padding: 0.45rem 0.6rem; border-radius: 8px; cursor: pointer; font-size: 0.85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      aside li { position: relative; padding: 0.45rem 1.7rem 0.45rem 0.6rem; border-radius: 8px; cursor: pointer; font-size: 0.85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      aside li .del { position: absolute; right: 0.25rem; top: 0.3rem; display: none; border: 0; background: none; color: var(--muted); padding: 0 0.35rem; font-size: 1rem; line-height: 1.2; }
+      aside li:hover .del, aside li.active .del { display: inline; }
+      aside li .del:hover { color: var(--accent); }
       aside li:hover { background: var(--paper); }
       aside li.active { background: var(--paper); font-weight: 600; }
       aside li small { display: block; color: var(--muted); font-weight: 400; font-size: 0.7rem; }
@@ -164,8 +167,19 @@
           li.title = s.title || s.id
           li.append(el('small', '', `${new Date(s.updatedAt).toLocaleString()} · ${s.turns} turn${s.turns === 1 ? '' : 's'}`))
           li.onclick = () => openSession(s.id)
+          const del = el('button', 'del', '×')
+          del.title = 'Delete this chat'
+          del.onclick = (event) => { event.stopPropagation(); deleteSession(s.id) }
+          li.append(del)
           ul.append(li)
         }
+      }
+      // DELETE forgets the stored turns and the KV-cache file; a deleted open chat starts over.
+      const deleteSession = async (id) => {
+        if (busy) return
+        await fetch(`${api}/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {})
+        if (id === chat.session) { chat = { session: newSession(), history: [] }; setAttached(null); paint() }
+        loadSessions()
       }
       const openSession = async (id) => {
         if (busy) return

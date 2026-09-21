@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { kappa } from './judge/judge.mjs'
 import { aggregateMemory, scoreMemory } from './metrics/memory.mjs'
+import { aggregateMultiquery } from './metrics/multiquery.mjs'
 import { aggregateMultiturn, scoreMultiturn } from './metrics/multiturn.mjs'
 import { aggregateRetrieval, percentile } from './metrics/retrieval.mjs'
 import { memoryTrend, scoreStress } from './metrics/stress.mjs'
@@ -50,6 +51,42 @@ const latency = (rows) => {
   }
 }
 
+// Tokens a turn cost, from usage (every completion of the turn, the query
+// rewrite included) and stats (the answer path alone), plus the tokens one
+// whole session cost; the A/B of retrieval strategies compares these.
+const tokensBlock = (rows) => {
+  const ok = rows.filter((row) => row.status === 200 && !row.error)
+  const pick = (f) => ok.map(f).filter(Number.isFinite)
+  // rows written before ADR-012 carry hits and tool_calls but not these two fields
+  const freshOf = (r) => r.fresh_excerpts ?? (Array.isArray(r.hits) ? r.hits.filter((hit) => !hit.reused).length : null)
+  const searchesOf = (r) => r.search_calls ?? (Array.isArray(r.tool_calls) ? r.tool_calls.filter((call) => call.name === 'search_documents').length : null)
+  const sessions = Object.values(groupBy(ok, (r) => `${r.id}#${r.run}`))
+  return {
+    n: ok.length,
+    prompt_mean: mean(pick((r) => r.usage?.prompt_tokens)),
+    prefill_mean: mean(pick((r) => r.stats?.prefill_tokens)),
+    cached_mean: mean(pick((r) => r.usage?.prompt_tokens_details?.cached_tokens)),
+    completion_mean: mean(pick((r) => r.usage?.completion_tokens)),
+    // the median too: one runaway answer of 10k+ tokens moves the mean by 100+
+    completion_p50: percentile(pick((r) => r.usage?.completion_tokens), 0.5),
+    completion_max: Math.max(0, ...pick((r) => r.usage?.completion_tokens)) || null,
+    total_mean: mean(pick((r) => r.usage?.total_tokens)),
+    context_mean: mean(pick((r) => r.context_tokens)),
+    context_max: Math.max(0, ...pick((r) => r.context_tokens)) || null,
+    rewrite_mean: mean(pick((r) => r.stats?.rewrite_tokens)),
+    rewrite_turns: ok.filter((r) => r.rewrite).length,
+    rewrite_used: rate(ok.filter((r) => r.rewrite).map((r) => r.rewrite.used === true)),
+    rewrite_ms_mean: mean(pick((r) => r.stats?.rewrite_ms)),
+    session_total_mean: mean(sessions.map((s) => s.reduce((sum, r) => sum + (r.usage?.total_tokens ?? 0), 0))),
+    session_prefill_mean: mean(sessions.map((s) => s.reduce((sum, r) => sum + (r.stats?.prefill_tokens ?? 0), 0))),
+    fresh_excerpts_mean: mean(pick(freshOf)),
+    turns_with_fresh_excerpts: rate(ok.map((r) => (freshOf(r) ?? 0) > 0)),
+    search_calls_per_turn: mean(pick(searchesOf)),
+    turns_with_search: rate(ok.map((r) => (searchesOf(r) ?? 0) > 0)),
+    retrieval_ms_mean: mean(pick((r) => r.stats?.retrieval_ms)),
+  }
+}
+
 const textBlock = (rows) => ({
   must_rate: rate(rows.map((r) => r.must)),
   number_match_mean: mean(rows.map((r) => r.number_match)),
@@ -67,10 +104,10 @@ const readLabels = async (labelsDir, category) => {
 }
 
 // Judge aggregates for one category plus agreement with the hand labels.
-// A label row names the case (`id`), optionally the `run`, and the first
-// characters of the answer it was written for (`answer_prefix`), so a label
-// never scores a verdict on a different answer. Fields compared: whatever
-// the label has besides those keys.
+// A label row names the case (`id`), optionally the `run` and the `turn`, and
+// the first characters of the answer it was written for (`answer_prefix`), so
+// a label never scores a verdict on a different answer. Fields compared:
+// whatever the label has besides those keys.
 const judgeBlock = (verdicts, labels, turns = []) => {
   if (!verdicts.length) return null
   const ok = verdicts.filter((v) => v.parse_ok && v.verdict)
@@ -88,15 +125,19 @@ const judgeBlock = (verdicts, labels, turns = []) => {
     behaviour: dist(ok.map((v) => v.verdict.behaviour)),
     coherence: dist(ok.map((v) => v.verdict.coherence)),
     knowledge_retention: dist(ok.map((v) => v.verdict.knowledge_retention)),
+    // multiquery: units whose accumulated context was cut to fit the judge
+    trimmed_units: verdicts.filter((v) => v.context_trimmed > 0).length,
+    // claude-cli backend only
+    cost_usd: verdicts.some((v) => Number.isFinite(v.cost_usd)) ? Number(verdicts.reduce((sum, v) => sum + (v.cost_usd ?? 0), 0).toFixed(3)) : null,
     kappa: null,
   }
   const answerOf = (v) => turns.find((t) => t.category === v.category && t.id === v.id && t.run === v.run && t.turn === v.turn)?.text ?? ''
   const paired = labels.map((label) => ({
     label,
-    verdict: ok.find((v) => v.id === label.id && (label.run === undefined || v.run === label.run) && (!label.answer_prefix || answerOf(v).startsWith(label.answer_prefix))),
+    verdict: ok.find((v) => v.id === label.id && (label.run === undefined || v.run === label.run) && (label.turn === undefined || v.turn === label.turn) && (!label.answer_prefix || answerOf(v).startsWith(label.answer_prefix))),
   })).filter((p) => p.verdict)
   if (paired.length) {
-    const fields = Object.keys(labels[0]).filter((key) => !['id', 'run', 'note', 'answer', 'answer_prefix'].includes(key))
+    const fields = Object.keys(labels[0]).filter((key) => !['id', 'run', 'turn', 'note', 'answer', 'answer_prefix'].includes(key))
     block.kappa = { n: paired.length }
     for (const field of fields) {
       const truth = paired.map((p) => p.label[field])
@@ -187,6 +228,32 @@ export const aggregate = async ({ turns, verdicts, hardware, cases, config, labe
     }
   }
 
+  if (by.multiquery) {
+    const rows = by.multiquery
+    const verdictsMq = verdictsBy.multiquery ?? []
+    const verdictOf = (row) => verdictsMq.find((v) => v.id === row.id && v.run === row.run && v.turn === row.turn && v.parse_ok && v.verdict)
+    const goldVerdicts = rows.filter((r) => r.has_gold).map(verdictOf).filter(Boolean)
+    const noAnswerVerdicts = rows.filter((r) => r.has_gold === false).map(verdictOf).filter(Boolean)
+    metrics.multiquery = {
+      n_sessions: Object.keys(groupBy(rows, (r) => `${r.id}#${r.run}`)).length,
+      ...aggregateMultiquery(rows),
+      context_tokens_by_turn: Object.entries(groupBy(rows, (r) => r.turn))
+        .map(([turn, list]) => ({ turn: Number(turn), n: list.length, context: mean(list.map((r) => r.context_tokens)), cached: mean(list.map((r) => r.cached_tokens)), ttft: mean(list.map((r) => r.stats?.ttft_ms)) }))
+        .sort((a, b) => a.turn - b.turn),
+      ...textBlock(rows),
+      // code's read of the turns with gold that refused anyway (the judge's `answered` is the other read)
+      false_abstain_rate: rate(rows.filter((r) => r.has_gold).map((r) => r.abstained)),
+      tokens: tokensBlock(rows),
+      latency: latency(rows),
+      stats: toolStats(rows),
+      judge: judgeBlock(verdictsMq, await readLabels(labelsDir, 'multiquery'), turns),
+      // The judge's read of the two kinds of turn: with gold, was the answer
+      // faithful; without gold, did the assistant refuse rather than invent.
+      judge_gold: goldVerdicts.length ? { n: goldVerdicts.length, faithfulness_mean: mean(goldVerdicts.map((v) => v.derived?.faithfulness)), hallucination_rate: rate(goldVerdicts.map((v) => v.derived?.hallucination)), answered: dist(goldVerdicts.map((v) => v.verdict.answered)) } : null,
+      judge_no_answer: noAnswerVerdicts.length ? { n: noAnswerVerdicts.length, refused_rate: rate(noAnswerVerdicts.map((v) => v.verdict.answered === 'refused' || v.verdict.answered === 'no')), hallucination_rate: rate(noAnswerVerdicts.map((v) => v.derived?.hallucination)), answered: dist(noAnswerVerdicts.map((v) => v.verdict.answered)) } : null,
+    }
+  }
+
   if (by.stress) {
     const ctx = config.ctx?.[header.tier] ?? 16384
     const sessions = Object.values(groupBy(by.stress, (r) => `${r.id}#${r.run}`)).map((rows) => {
@@ -211,6 +278,8 @@ export const aggregate = async ({ turns, verdicts, hardware, cases, config, labe
       rss_tree_peak: Math.max(0, ...rows.map((r) => r.rss_tree ?? 0)) || null,
       rss_tree_mean: mean(rows.map((r) => r.rss_tree)),
       rss_bare_peak: Math.max(0, ...rows.map((r) => r.rss_bare ?? 0)) || null,
+      footprint_bare_peak: Math.max(0, ...rows.map((r) => r.footprint_bare ?? 0)) || null,
+      footprint_bare_mean: mean(rows.map((r) => r.footprint_bare)),
       system_used_mean: mean(rows.map((r) => r.system_used)),
       system_used_peak: Math.max(0, ...rows.map((r) => r.system_used ?? 0)) || null,
       cpu_mean: mean(rows.map((r) => r.cpu)),

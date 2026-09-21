@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { abstained } from '../metrics/text.mjs'
 
 // Verdict shapes, one per category, mirroring docs/todo.md "Judge: structured
 // output" field for field. The reasoning fields come before the labels so
@@ -44,7 +45,16 @@ export const MultiturnVerdict = z.object({
   notes: z.string().max(200),
 })
 
-export const SCHEMAS = { single: SingleVerdict, abstain: AbstainVerdict, multiturn: MultiturnVerdict }
+// One turn of a multi-query session, graded against everything the session
+// showed the assistant so far. No reference answer exists, so no `correct`.
+export const MultiqueryVerdict = z.object({
+  claims: z.array(Claim).max(8).describe('the answer split into atomic claims, at most 8'),
+  answered: z.enum(['yes', 'partial', 'no', 'refused']).describe('did the answer address the question at all'),
+  relevance: z.enum(['on_topic', 'partly', 'off_topic']),
+  notes: z.string().max(200),
+})
+
+export const SCHEMAS = { single: SingleVerdict, abstain: AbstainVerdict, multiturn: MultiturnVerdict, multiquery: MultiqueryVerdict }
 
 // JSON Schema for the SDK. `strict` in the SDK does not tighten anything, so
 // additionalProperties is closed here; llama.cpp's grammar keeps the keys in order.
@@ -72,6 +82,15 @@ export const derive = {
     hallucination: (verdict.invented_facts?.length ?? 0) > 0 || verdict.behaviour === 'hedged_with_number' || verdict.behaviour === 'answered',
     abstain_ok: verdict.behaviour === 'abstained' && (verdict.invented_facts?.length ?? 0) === 0,
   }),
+  // A claim that only says the documents lack something ("no service credit
+  // is specified") is a refusal, not a fact; the local judge lists it anyway
+  // and marks it not_in_context, which turned every honest refusal into a
+  // hallucination (kappa 0.15 against hand labels, 2026-09-18). Those claims
+  // are left out of faithfulness and hallucination here.
+  multiquery: (verdict, context) => {
+    const factual = (verdict.claims ?? []).filter((c) => !(c.support === 'not_in_context' && abstained(c.text)))
+    return { ...derive.single({ ...verdict, claims: factual }, context), n_claims: (verdict.claims ?? []).length, n_meta_claims: (verdict.claims ?? []).length - factual.length }
+  },
   multiturn: (verdict) => {
     const turns = verdict.turns ?? []
     const followups = turns.filter((t) => t.reference_resolved !== 'na')

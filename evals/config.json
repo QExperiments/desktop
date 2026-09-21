@@ -11,19 +11,115 @@
     "L": null
   },
   "judge": {
+    "backend": "local",
     "constant": "QWEN3_5_9B_MULTIMODAL_Q4_K_M",
     "batch": 1,
-    "ctx": 8192,
+    "ctx": 16384,
     "temp": 0,
-    "predict": 700
+    "predict": 900,
+    "cliModel": "haiku",
+    "cliParallel": 4
   },
   "judgeCategories": [
-    "single"
+    "single",
+    "multiquery"
   ],
   "ctx": {
     "S": 8192,
     "M": 16384,
     "L": 32768
   },
-  "predict": 320
+  "predict": 320,
+  "variants": {
+    "baseline": {
+      "env": {},
+      "note": "the defaults: layout current, 5 chunks a turn, the last three questions in the search text of a follow-up"
+    },
+    "tool-retrieval": {
+      "env": {
+        "MERIDIAN_RETRIEVAL_MODE": "tool"
+      },
+      "note": "search before the first turn only; later turns call search_documents"
+    },
+    "rewrite": {
+      "env": {
+        "MERIDIAN_QUERY_REWRITE": "1"
+      },
+      "note": "turns with history search for a model-rewritten standalone query"
+    },
+    "cosine": {
+      "env": {
+        "MERIDIAN_FUSION": "cosine"
+      },
+      "note": "vector ranking alone, no BM25 leg"
+    },
+    "bm25": {
+      "env": {
+        "MERIDIAN_FUSION": "bm25"
+      },
+      "note": "full-text ranking alone, no vector leg"
+    },
+    "context-all-k5": {
+      "env": {
+        "MERIDIAN_CONTEXT_LAYOUT": "all"
+      },
+      "note": "excerpts accumulate as before (KV reused end to end) with today's k and search text: the layout control"
+    },
+    "shipped-0920": {
+      "env": {
+        "MERIDIAN_CONTEXT_LAYOUT": "all",
+        "MERIDIAN_CHAT_TOPK": "3",
+        "QUERY_HISTORY_TURNS": "1"
+      },
+      "note": "what serve did before 2026-09-21: excerpts of every turn stay in the context, 3 chunks a turn, the question alone as the search text"
+    },
+    "budget-8k": {
+      "env": {
+        "MERIDIAN_CONTEXT_BUDGET": "8000"
+      },
+      "note": "layout current with a context budget: the excerpts stay in the cached prefix until the context crosses 8k, then one clean prefill"
+    },
+    "budget-5k": {
+      "env": {
+        "MERIDIAN_CONTEXT_BUDGET": "5000"
+      },
+      "note": "as budget-8k, compacting twice as often"
+    },
+    "direct-k5": {
+      "env": {
+        "MERIDIAN_CHAT_ENGINE": "direct"
+      },
+      "note": "the direct addon engine: the cached state holds the bare conversation, this turn's excerpts live in a throwaway key (docs/todo-5.md)"
+    },
+    "discard-all-8k": {
+      "env": {
+        "MERIDIAN_CONTEXT_LAYOUT": "all",
+        "MERIDIAN_CHAT_CTX": "8192",
+        "MERIDIAN_CHAT_DISCARD": "2048"
+      },
+      "note": "the same on half the context, so the window fires from the fourth or fifth turn of a session instead of only on the longest ones"
+    },
+    "all-8k-nodiscard": {
+      "env": {
+        "MERIDIAN_CONTEXT_LAYOUT": "all",
+        "MERIDIAN_CHAT_CTX": "8192"
+      },
+      "note": "the control for discard-all-8k: same layout and context, window off, so the turn that crosses 8192 throws context overflow and takes the session's KV state with it"
+    },
+    "tools-in-system": {
+      "env": {
+        "MERIDIAN_TOOLS_IN_SYSTEM": "1"
+      },
+      "note": "the tool declarations are written into the system prompt, which the prime protects, instead of being handed to the SDK; calls are read out of the model's text (docs/todo-6.md)"
+    },
+    "tools-in-system-discard": {
+      "env": {
+        "MERIDIAN_TOOLS_IN_SYSTEM": "1",
+        "MERIDIAN_CONTEXT_LAYOUT": "all",
+        "MERIDIAN_CHAT_CTX": "8192",
+        "MERIDIAN_CHAT_DISCARD": "2048"
+      },
+      "note": "discard-all-8k with the declarations in the system prompt: the 439 tokens a turn the evictable block costs should go away"
+    }
+  }
 }

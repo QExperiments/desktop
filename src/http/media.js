@@ -59,12 +59,12 @@ export const registerMedia = (app, runtime, sessions) => {
     const query = String(await withUpload(part, (path) => runtime.transcribe(path))).trim()
     if (!query) return reply.code(400).send({ error: { message: 'no speech recognised in the recording', type: 'invalid_request_error' } })
     // No client history on this route: earlier turns of the session come from the store.
-    const stored = session ? await sessions.context(session) : { messages: [], shown: [] }
-    const spoken = await answer(runtime, { messages: [...stored.messages, { role: 'user', content: query }], shown: stored.shown, session: session || undefined })
+    const stored = session ? await sessions.context(session) : { messages: [], shown: [], base: 0 }
+    const spoken = await answer(runtime, { messages: [...stored.messages, { role: 'user', content: query }], shown: stored.shown, base: stored.base, session: session || undefined })
     const pcm = await runtime.speak(spoken.text, { language })
     if (session) {
       const shown = spoken.hits.filter((hit) => !hit.reused).map((hit) => hit.id)
-      await sessions.append(session, { kind: 'voice', query, answer: spoken.text, citations: spoken.citations, messages: spoken.messages, shown })
+      await sessions.append(session, { kind: 'voice', query, answer: spoken.text, citations: spoken.citations, messages: spoken.messages, shown, base: spoken.base })
     }
 
     return {

@@ -2,6 +2,8 @@
 //                     plus a tree-shaken, minified bundle of our own code (req 6.2.2)
 // npm run build:full  the same with every built-in plugin first, then writes
 //                     docs/bundle-size.md comparing the two
+// --no-ui             leave the chat page and test console (src/http/ui.js,
+//                     ejs, @fastify/view) out of the app bundle: API only
 import { bundleSdk } from '@qvac/sdk/commands'
 import { build } from 'esbuild'
 import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs'
@@ -30,6 +32,7 @@ const variant = async (label, configPath) => {
 }
 
 const full = process.argv.includes('--full')
+const noUi = process.argv.includes('--no-ui')
 mkdirSync(join(root, 'dist'), { recursive: true })
 const rows = []
 if (full) {
@@ -47,8 +50,9 @@ await build({
   target: 'node22',
   format: 'esm',
   outfile: join(root, 'dist', 'meridian-assistant.mjs'),
-  // Native addons and the worker bundle above load at runtime.
-  external: ['@qvac/*', '@lancedb/*', 'node:*'],
+  // Native addons and the worker bundle above load at runtime. ui.js is
+  // imported dynamically, so marked external it drops out with its deps.
+  external: ['@qvac/*', '@lancedb/*', 'node:*', ...(noUi ? ['./src/http/ui.js'] : [])],
   logLevel: 'warning',
 })
 const app = size(join(root, 'dist', 'meridian-assistant.mjs'))
@@ -59,7 +63,7 @@ const table = [
   ...rows.map((r) => `| ${r.label} | ${r.plugins} | ${mb(r.worker)} | ${mb(r.allHosts)} | ${mb(r.thisHost)} |`),
 ].join('\n')
 
-console.log(`\n${table}\n\nApplication code, tree-shaken and minified: ${mb(app)}`)
+console.log(`\n${table}\n\nApplication code, tree-shaken and minified: ${mb(app)}${noUi ? ' (without the UI)' : ''}`)
 console.log(`Scoped addons: ${rows.at(-1).addons.join(', ')}`)
 
 if (full) {

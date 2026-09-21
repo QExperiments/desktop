@@ -28,3 +28,18 @@ test('lookup_stock reports an unknown SKU as no record, with suggestions', async
 test('tool facts are cited as the tool plus its data date', () => {
   assert.deepEqual(toolCitation.lookup_stock, { file: 'stock-tool', asOf: '2026-06-30' })
 })
+
+test('search_documents is a factory bound to the caller\'s search and validates its query', async () => {
+  const { searchDocumentsTool } = await import('../../src/chat/tools.js')
+  const calls = []
+  const tool = searchDocumentsTool({ run: async (query) => { calls.push(query); return { excerpts: [{ source: 'a.md', text: 'x' }], already_in_conversation: [] } } })
+  assert.equal(tool.name, 'search_documents')
+  assert.equal(tool.maxTries, 2)
+  assert.equal(tool.parameters.safeParse({}).success, false)
+  assert.equal(tool.parameters.safeParse({ query: 'extended warranty ServoDrive X4' }).success, true)
+  const result = await tool.handler({ query: 'extended warranty ServoDrive X4' })
+  assert.deepEqual(calls, ['extended warranty ServoDrive X4'])
+  assert.equal(result.excerpts[0].source, 'a.md')
+  // the shipped tool list is still the two required tools
+  assert.deepEqual(tools.map((t) => t.name).sort(), ['list_documents', 'lookup_stock'])
+})

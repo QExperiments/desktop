@@ -37,21 +37,26 @@ export const scoreStress = (rows, { ctx, predict = 320 }) => {
     total_p95: percentile(total, 0.95),
     ttft_slope_ms_per_turn: slope(ok.map((row) => [row.turn, row.stats?.ttft_ms]).filter(([, y]) => Number.isFinite(y))),
     prompt_tokens_by_turn: prompt.map(([turn, tokens]) => ({ turn, tokens })),
-    cached_tokens_by_turn: ok.map((row) => ({ turn: row.turn, tokens: row.usage?.prompt_tokens_details?.cached_tokens ?? null })),
+    // cached_tokens is the KV cache the first round of the turn started from,
+    // i.e. the history reused across turns. Rows before it was recorded fall
+    // back to usage's cached_tokens, which sums the rounds of a tool loop and
+    // can exceed the context.
+    cached_tokens_by_turn: ok.map((row) => ({ turn: row.turn, tokens: row.cached_tokens ?? row.usage?.prompt_tokens_details?.cached_tokens ?? null })),
     ctx_hit_turn: ctxHit ? { turn: ctxHit.turn, what: ctxHit.error ? 'error' : ctxHit.empty ? 'empty' : 'answered', prompt_tokens: held(ctxHit) } : null,
   }
 }
 
 // Memory of the server tree during one session's generating phase, from the
-// sampler rows labelled with the case: peak and slope over time (bytes per second).
+// sampler rows labelled with the case: peak and slope over time (bytes per
+// second). The footprint slope is the KV cache growing with the session.
 export const memoryTrend = (hardwareRows) => {
   const rss = hardwareRows.map((row) => [row.t / 1000, row.rss_tree]).filter(([, y]) => Number.isFinite(y))
-  const sys = hardwareRows.map((row) => [row.t / 1000, row.system_used]).filter(([, y]) => Number.isFinite(y))
+  const footprint = hardwareRows.map((row) => [row.t / 1000, row.footprint_bare]).filter(([, y]) => Number.isFinite(y))
   return {
     samples: hardwareRows.length,
     rss_tree_peak: rss.length ? Math.max(...rss.map(([, y]) => y)) : null,
     rss_tree_slope_bps: slope(rss),
-    system_used_peak: sys.length ? Math.max(...sys.map(([, y]) => y)) : null,
-    system_used_slope_bps: slope(sys),
+    footprint_bare_peak: footprint.length ? Math.max(...footprint.map(([, y]) => y)) : null,
+    footprint_bare_slope_bps: slope(footprint),
   }
 }

@@ -6,8 +6,6 @@
 {"id":"single-06","run":1,"answer_prefix":"According to Document 1 (FIN-SAL-2026-Q1","answered":"yes","correct":"yes","hallucination":false,"note":"18.4M taken from the Q1 summary section 4, which does state it"}
 {"id":"single-07","run":1,"answer_prefix":"Based on the Atlas Manufacturing kickoff","answered":"yes","correct":"partial","hallucination":true,"note":"date right; \"specified in the SOW\" is not in the excerpts"}
 {"id":"single-08","run":1,"answer_prefix":"Based on the discount authority document","answered":"yes","correct":"yes","hallucination":false,"note":"10% and the CFO+CRO rule both in the discount email"}
-{"id":"single-09","run":1,"answer_prefix":"Согласно документам Meridian Components,","answered":"yes","correct":"yes","hallucination":false,"note":"24 months and the 8% extended warranty are in the warranty excerpt"}
-{"id":"single-10","run":1,"answer_prefix":"На основе предоставленных документов, ст","answered":"yes","correct":"yes","hallucination":false,"note":"12 business days, Hannah Cho 17 June, rev C exclusion all supported"}
 {"id":"single-01","run":2,"answer_prefix":"Based on the corporate documents, the en","answered":"yes","correct":"partial","hallucination":true,"note":"4 h and escalation clocks supported; \"P1 is best effort for non-production issues\" is not in the matrix (P3 is best effort)"}
 {"id":"single-02","run":2,"answer_prefix":"Based on the documents, the list price f","answered":"yes","correct":"yes","hallucination":false,"note":"price and the three sources all shown"}
 {"id":"single-03","run":2,"answer_prefix":"Based on the email from Priya Nair dated","answered":"yes","correct":"yes","hallucination":false,"note":"3.1% and the 3.8% ARR churn quote are in the competitor notes, paraphrased"}
@@ -16,5 +14,3 @@
 {"id":"single-06","run":2,"answer_prefix":"According to the Q2 2026 Sales Summary d","answered":"yes","correct":"yes","hallucination":false,"note":"18.4M quoted from the Q1 summary section 4; the document is misnamed Q2 summary but the quote is verbatim"}
 {"id":"single-07","run":2,"answer_prefix":"Based on the email from Priya Nair (docu","answered":"yes","correct":"yes","hallucination":false,"note":"date and the shutdown-window note are in the kickoff email"}
 {"id":"single-08","run":2,"answer_prefix":"Based on the documents, the maximum disc","answered":"yes","correct":"yes","hallucination":false,"note":"10% in the discount email; the competitor notes repeat the ceiling"}
-{"id":"single-09","run":2,"answer_prefix":"Согласно документу [3], стандартная гара","answered":"yes","correct":"yes","hallucination":false,"note":"24 months from the warranty excerpt"}
-{"id":"single-10","run":2,"answer_prefix":"Согласно опубликованным стандартам, стан","answered":"yes","correct":"yes","hallucination":false,"note":"12 business days from the 17 June email"}

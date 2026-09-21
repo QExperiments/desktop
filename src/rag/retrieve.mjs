@@ -1,5 +1,5 @@
 import { loadModel, unloadModel, embed } from '@qvac/sdk'
-import { config, getEmbeddingModelSrc, query } from './store.mjs'
+import { config, getEmbeddingModelSrc, query, queryTextForEmbedding } from './store.mjs'
 
 let cachedModelId = null
 let cachedSource = null
@@ -27,13 +27,25 @@ export async function releaseModel() {
   }
 }
 
-// Embeds the query and runs hybrid search, dropping results without a usable score.
-// `embed`, when given, is the caller's embedder (the server's runtime already
-// holds EmbeddingGemma, so loading a second copy here would double 0.33 GB);
-// without it this module loads its own, which the CLI ingest and eval use.
-export async function search(queryText, topK = config.topK, { embed: embedWith } = {}) {
-  const { embedding } = embedWith ? await embedWith(queryText) : await embed({ modelId: await ensureModel(), text: queryText })
-  const results = await query(queryText, embedding, topK)
+// Embeds the query and searches the store, dropping results without a usable
+// score. `embed`, when given, is the caller's embedder (the server's runtime
+// already holds EmbeddingGemma, so loading a second copy here would double
+// 0.33 GB); without it this module loads its own, which the CLI ingest and
+// eval use. `fusion` is passed through to the store (rrf, cosine, bm25); the
+// bm25 leg alone needs no embedding. The vector leg embeds the query with the
+// EMBED_PREFIX task prefix when one is configured; BM25 sees the raw query.
+// `vectorTexts` / `ftsTexts` (default: the query alone) are the texts each leg
+// searches for; src/rag/query-history.mjs builds them from the question and the
+// earlier questions of the conversation when QUERY_HISTORY_TURNS > 1.
+export async function search(queryText, topK = config.topK, { embed: embedWith, fusion = 'rrf', vectorTexts = [queryText], ftsTexts = [queryText] } = {}) {
+  const embeddings = []
+  if (fusion !== 'bm25') {
+    for (const text of vectorTexts) {
+      const embedText = queryTextForEmbedding(text)
+      embeddings.push((embedWith ? await embedWith(embedText) : await embed({ modelId: await ensureModel(), text: embedText })).embedding)
+    }
+  }
+  const results = await query(ftsTexts, embeddings, topK, { fusion })
   return results.filter((r) => r.score !== undefined)
 }
 

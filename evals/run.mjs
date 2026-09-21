@@ -12,9 +12,10 @@ import { parseArgs } from 'node:util'
 import { aggregate } from './lib/aggregate.mjs'
 import { CATEGORIES, LIVE, countTurns, loadCases } from './lib/cases.mjs'
 import { ask } from './lib/client.mjs'
-import { judge } from './lib/judge/judge.mjs'
+import { fitContext, judge } from './lib/judge/judge.mjs'
 import { scoreMemory } from './lib/metrics/memory.mjs'
-import { scoreRetrieval } from './lib/metrics/retrieval.mjs'
+import { scoreMultiqueryTurn } from './lib/metrics/multiquery.mjs'
+import { K_LIST, scoreRetrieval } from './lib/metrics/retrieval.mjs'
 import { scoreText } from './lib/metrics/text.mjs'
 import { scoreTools } from './lib/metrics/tools.mjs'
 import { buildReport } from './lib/report/build.mjs'
@@ -32,14 +33,24 @@ const { values: flags } = parseArgs({
     runs: { type: 'string' },
     'no-judge': { type: 'boolean', default: false },
     judge: { type: 'string' },
+    // local (default) or claude-cli. Only the flag selects claude-cli: its
+    // prompts, corpus excerpts included, go to Anthropic (lib/judge/judge.mjs).
+    'judge-backend': { type: 'string', default: 'local' },
     'report-only': { type: 'string' },
     'judge-only': { type: 'string' },
+    'retrieval-only': { type: 'string' },
+    // A retrieval strategy from config.json `variants` (ADR-012): serve starts
+    // with that environment and the results directory carries the name.
+    variant: { type: 'string' },
     cases: { type: 'string' },
     config: { type: 'string', default: join(here, 'config.json') },
   },
 })
 
 const config = JSON.parse(await readFile(flags.config, 'utf8'))
+const judgeBackend = flags['judge-backend']
+if (!['local', 'claude-cli'].includes(judgeBackend)) throw new Error(`--judge-backend must be local or claude-cli, not ${judgeBackend}`)
+if (config.judge?.backend && config.judge.backend !== 'local') throw new Error('judge.backend in config.json must stay "local"; pass --judge-backend claude-cli on the command line to send judge prompts to Anthropic')
 const log = (fields, msg) => console.log(`${new Date().toISOString().slice(11, 19)} ${msg}${fields ? ' ' + JSON.stringify(fields) : ''}`)
 const jsonl = (path) => (row) => appendFile(path, `${JSON.stringify(row)}\n`)
 const readJsonl = async (path) => (await readFile(path, 'utf8').catch(() => '')).split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l))
@@ -61,55 +72,83 @@ if (flags['report-only']) {
 
 // --judge-only <dir>: keep the turns of a finished run, grade them again
 // (a new judge model, a changed prompt) and rebuild the report.
+// --retrieval-only <dir>: keep the live turns and the verdicts of a finished
+// run, score retrieval again (new cases, a changed metric, a re-ingested
+// index) and rebuild the report. Retrieval never calls the chat model, so the
+// stored latency and hardware rows stay valid.
 const judgeOnly = flags['judge-only'] ? resolve(flags['judge-only']) : null
-const stored = judgeOnly ? JSON.parse(await readFile(join(judgeOnly, 'header.json'), 'utf8')) : null
+const retrievalOnly = flags['retrieval-only'] ? resolve(flags['retrieval-only']) : null
+const storedDir = judgeOnly ?? retrievalOnly
+const stored = storedDir ? JSON.parse(await readFile(join(storedDir, 'header.json'), 'utf8')) : null
 
+const variant = flags.variant ?? stored?.variant ?? null
+if (variant && !config.variants?.[variant]) throw new Error(`--variant must be one of ${Object.keys(config.variants ?? {}).join(', ')}, not ${variant}`)
+const serverEnv = variant ? config.variants[variant].env ?? {} : {}
 const tier = (flags.tier ?? stored?.tier ?? config.tier).toUpperCase()
 const runs = Number(flags.runs ?? stored?.runs ?? config.runs)
 const only = flags.only ? flags.only.split(',').map((s) => s.trim()) : CATEGORIES
 const casesDir = flags.cases ?? join(here, 'cases')
 const ts = stored?.ts ?? new Date().toISOString().replace(/[:.]/g, '-')
 const runTag = `eval-${ts}`
-const out = judgeOnly ?? join(here, 'results', ts)
+const out = storedDir ?? join(here, 'results', variant ? `${ts}-${variant}` : ts)
 await mkdir(out, { recursive: true })
 const writeTurn = jsonl(join(out, 'turns.jsonl'))
 const writeVerdict = jsonl(join(out, 'verdicts.jsonl'))
-await writeFile(join(out, 'verdicts.jsonl'), '')
+if (!retrievalOnly) await writeFile(join(out, 'verdicts.jsonl'), '')
 
 const plan = await loadCases({ dir: casesDir, only, runs })
-if (!judgeOnly) log({ tier, runs, categories: Object.fromEntries(Object.entries(plan).map(([k, v]) => [k, v.length])), turns: countTurns(plan), out }, 'plan')
+if (!storedDir) log({ tier, runs, categories: Object.fromEntries(Object.entries(plan).map(([k, v]) => [k, v.length])), turns: countTurns(plan), out }, 'plan')
 
-// ---- retrieval: no model call, its own embedder, released before the sampler starts
+// ---- retrieval: no model call, its own embedder, released before the sampler
+// starts. One search per k in K_LIST, each scored at its own depth (see
+// lib/metrics/retrieval.mjs for why a deep search sliced would not do).
 if (plan.retrieval?.length && !judgeOnly) {
   const { releaseModel, search } = await import('../src/rag/retrieve.mjs')
+  const rows = []
+  const deepestK = Math.max(...K_LIST)
   for (const job of plan.retrieval) {
-    const k = job.case.k ?? 3
-    const t0 = Date.now()
-    const results = await search(job.case.query, k)
-    const retrieval_ms = Date.now() - t0
-    const files = results.map((r) => r.file)
-    await writeTurn({ category: 'retrieval', id: job.case.id, run: 1, turn: 1, query: job.case.query, gold: job.case.gold_doc_ids, retrieval_ms, ...scoreRetrieval(files, job.case.gold_doc_ids, k) })
+    const perK = {}
+    let hits = []
+    let retrieval_ms = null
+    for (const k of K_LIST) {
+      const t0 = Date.now()
+      const results = await search(job.case.query, k)
+      perK[k] = results.map((r) => r.file)
+      if (k === deepestK) {
+        retrieval_ms = Date.now() - t0
+        hits = results.map((r) => ({ file: r.file, chunkIndex: r.chunkIndex, score: r.score }))
+      }
+    }
+    rows.push({ category: 'retrieval', id: job.case.id, run: 1, turn: 1, query: job.case.query, gold: job.case.gold_doc_ids, retrieval_ms, hits, ...scoreRetrieval(perK, job.case.gold_doc_ids) })
   }
   await releaseModel()
+  if (retrievalOnly) {
+    // Replace the run's retrieval rows; every live turn stays as it was.
+    const kept = (await readJsonl(join(out, 'turns.jsonl'))).filter((row) => row.category !== 'retrieval')
+    await writeFile(join(out, 'turns.jsonl'), [...rows, ...kept].map((row) => `${JSON.stringify(row)}\n`).join(''))
+  } else {
+    for (const row of rows) await writeTurn(row)
+  }
   log({ n: plan.retrieval.length }, 'retrieval scored')
 }
 
 // ---- live categories against a fresh serve
-const liveJobs = judgeOnly ? [] : Object.entries(plan).filter(([category]) => category !== 'retrieval').flatMap(([, jobs]) => jobs)
-let header = stored ?? { ts, tier, runs, config, judge: flags['no-judge'] ? null : (flags.judge ?? config.judge.constant) }
-if (judgeOnly) header = { ...header, judge: flags.judge ?? config.judge.constant }
+const liveJobs = storedDir ? [] : Object.entries(plan).filter(([category]) => category !== 'retrieval').flatMap(([, jobs]) => jobs)
+const judgeName = flags['no-judge'] ? null : judgeBackend === 'claude-cli' ? `claude-cli:${config.judge.cliModel ?? 'haiku'}` : (flags.judge ?? config.judge.constant)
+let header = stored ?? { ts, tier, runs, variant, serverEnv, config, judge: judgeName, judgeBackend }
+if (judgeOnly) header = { ...header, judge: judgeName, judgeBackend }
 if (liveJobs.length) {
   const sampler = createSampler({ intervalMs: config.sampleMs, out: join(out, 'hardware.jsonl') })
   sampler.mark({ phase: 'before_load' })
   await sampler.start()
   await sleep(3000)
 
-  const server = await startServer({ port: config.port, tier, cwd: repo, logPath: join(out, 'serve.log') })
+  const server = await startServer({ port: config.port, tier, cwd: repo, logPath: join(out, 'serve.log'), env: serverEnv })
   sampler.watch(server.pid)
   sampler.mark({ phase: 'loaded_idle' })
   const health = await server.health()
   header = { ...header, coldStartMs: server.coldStartMs, hardware: health.hardware, chatModel: health.models?.find((m) => m.role === 'chat')?.constant, embedModel: health.models?.find((m) => m.role === 'embed')?.constant, servedTier: health.tier }
-  log({ coldStartMs: server.coldStartMs, tier: health.tier, chat: header.chatModel }, 'serve ready')
+  log({ coldStartMs: server.coldStartMs, tier: health.tier, chat: header.chatModel, variant: variant ?? 'baseline', env: serverEnv }, 'serve ready')
   await sleep(4000)
 
   const tracesDir = join(repo, 'data', 'traces')
@@ -120,28 +159,70 @@ if (liveJobs.length) {
       const { category } = job
       const session = LIVE.has(category) ? `${runTag}-${job.case.id}-r${job.run}`.slice(0, 64) : null
       const rows = []
+      // Rows whose excerpts are still in the model's context. A turn that
+      // reports a compaction (layout current) replaced the context with a
+      // clean one, so everything before it is gone; under layout all the
+      // list is every row of the session.
+      let inContext = []
       for (const turn of job.turns) {
         sampler.mark({ phase: 'generating', category, case: job.case.id, run: job.run, turn: turn.turn })
         const messages = category === 'tools' ? [...turn.history, { role: 'user', content: turn.query }] : [{ role: 'user', content: turn.query }]
         const reply = await ask({ base: server.base, messages, session, run: runTag, timeoutMs: config.requestTimeoutMs })
         const trace = await readTrace(tracesDir, runTag, reply.requestId)
         const { excerpts, toolResults, hits } = contextOf(trace)
-        const context = `${excerpts}\n${toolResults}`
+        // multiquery answers may draw on excerpts shown earlier in the session, so
+        // `grounded` checks the numbers against everything shown so far.
+        const context = category === 'multiquery'
+          ? [...rows.map((r) => `${r.context}\n${r.toolResults}`), `${excerpts}\n${toolResults}`].join('\n')
+          : `${excerpts}\n${toolResults}`
         const gold = turn.gold_doc_ids ?? job.case.gold_doc_ids ?? []
+        // multiquery: retrieval scored from the hits the model saw, with the files shown earlier in the session.
+        if (trace?.retrieval?.compacted) inContext = []
+        const shownBefore = new Set(inContext.flatMap((r) => (r.hits ?? []).map((h) => h.file)))
+        const retrieval = category === 'multiquery' ? scoreMultiqueryTurn({ hits, gold, shownBefore }) : {}
         const text = scoreText({ query: turn.query, text: reply.text, citations: reply.citations, gold, reference: turn.reference ?? job.case.reference, mustPatterns: turn.must ?? [], context })
         const tools = scoreTools(trace, { tool: turn.tool ?? null, args: turn.args ?? null })
         const row = {
           category, id: job.case.id, run: job.run, turn: turn.turn, session, query: turn.query, kind: job.case.kind, note: job.case.note, followup: turn.followup === true,
-          reference: turn.reference ?? job.case.reference ?? null, expected_tool: turn.tool === undefined ? undefined : (turn.tool ?? null), expected_args: turn.args ?? null,
+          reference: turn.reference ?? job.case.reference ?? null, gold, expected_tool: turn.tool === undefined ? undefined : (turn.tool ?? null), expected_args: turn.args ?? null,
           status: reply.status, error: reply.error, text: reply.text, citations: reply.citations, requestId: reply.requestId,
           wall_ms: reply.wallMs, ttft_client_ms: reply.ttftClientMs, usage: reply.usage, stats: reply.stats ? { ...reply.stats, tool_calls: undefined } : null,
           hits: hits.map(({ content, ...hit }) => hit), context: excerpts, toolResults, rounds: trace?.rounds?.length ?? null,
           thinking_chars: (trace?.rounds ?? []).reduce((s, r) => s + (r.thinkingChars ?? 0), 0),
-          context_tokens: (trace?.rounds ?? []).reduce((max, r) => Math.max(max, (r.stats?.promptTokens ?? 0) + (r.stats?.cacheTokens ?? 0)), 0) || null,
+          // The live KV a round ended with; `cacheTokens` already holds that
+          // round's prompt and answer, so it is the context, not an addend
+          // (src/chat/stats.js).
+          context_tokens: (trace?.rounds ?? []).reduce((max, r) => Math.max(max, (r.stats?.cacheTokens ?? 0) || ((r.stats?.promptTokens ?? 0) + (r.stats?.generatedTokens ?? 0))), 0) || null,
+          // KV cache the turn started from: what stood in it before the first
+          // round ran, which is that round's final size less its own tokens.
+          cached_tokens: trace?.rounds?.[0]?.stats
+            ? Math.max(0, (trace.rounds[0].stats.cacheTokens ?? 0) - (trace.rounds[0].stats.promptTokens ?? 0) - (trace.rounds[0].stats.generatedTokens ?? 0))
+            : null,
           tool_calls: (trace?.rounds ?? []).flatMap((r) => r.toolCalls ?? []),
-          ...text, ...tools,
+          // Retrieval strategy fields (ADR-012): the mode serve ran, how many
+          // chunks this turn put in front of the model for the first time, the
+          // search_documents calls it made and the rewrite it searched for.
+          retrieval_mode: trace?.retrieval?.mode ?? null,
+          fusion: trace?.retrieval?.fusion ?? null,
+          layout: trace?.retrieval?.layout ?? null,
+          engine: trace?.retrieval?.engine ?? null,
+          // The chat role's sliding window, when an experiment turned it on:
+          // ctx_size it was given and how many tokens a discard drops.
+          ctx: trace?.retrieval?.ctx ?? null,
+          discard: trace?.retrieval?.discard ?? null,
+          // A turn whose context no longer holds the excerpts of the turns
+          // before it (layout current), and what that cost the KV cache:
+          // off (no key at all), reused or dropped.
+          compacted: trace?.retrieval?.compacted ?? null,
+          cache: trace?.retrieval?.cache ?? null,
+          search_query: trace?.retrieval?.history ?? null,
+          fresh_excerpts: hits.filter((hit) => !hit.reused).length,
+          search_calls: (trace?.rounds ?? []).flatMap((r) => r.toolCalls ?? []).filter((call) => call.name === 'search_documents').length,
+          rewrite: trace?.retrieval?.rewrite ? { to: trace.retrieval.rewrite.to, used: trace.retrieval.rewrite.used, ms: trace.retrieval.rewrite.ms, tokens: reply.stats?.rewrite_tokens ?? null, error: trace.retrieval.rewrite.error ?? null } : null,
+          ...text, ...tools, ...retrieval,
         }
         rows.push(row)
+        inContext.push(row)
         await writeTurn(row)
         done++
         if (reply.error) log({ id: job.case.id, run: job.run, turn: turn.turn, status: reply.status, error: reply.error }, 'turn failed')
@@ -165,8 +246,9 @@ await writeFile(join(out, 'header.json'), JSON.stringify(header, null, 2))
 
 // ---- judge, after serve is gone so its memory never overlaps the phases above
 const turns = await readJsonl(join(out, 'turns.jsonl'))
-let verdicts = []
-if (!flags['no-judge']) {
+// A retrieval re-score keeps the run's verdicts; every other path grades afresh.
+let verdicts = retrievalOnly ? await readJsonl(join(out, 'verdicts.jsonl')) : []
+if (!flags['no-judge'] && !retrievalOnly) {
   const judgeConfig = { ...config.judge, ...(flags.judge ? { constant: flags.judge } : {}) }
   const categories = config.judgeCategories ?? ['single']
   const units = []
@@ -176,14 +258,34 @@ if (!flags['no-judge']) {
       const groups = {}
       for (const row of rows) (groups[`${row.id}#${row.run}`] ??= []).push(row)
       for (const [key, group] of Object.entries(groups)) units.push({ key: `multiturn-${key}`, category, rows: group })
+    } else if (category === 'multiquery') {
+      // One unit per turn, graded against everything the session showed the
+      // model up to that turn (excerpts and tool results), else a fact from a
+      // chunk three turns back reads as not_in_context. Trimmed from the oldest
+      // block when it would not fit the local judge's context.
+      const maxChars = judgeBackend === 'claude-cli' ? Infinity : Math.max(4000, ((judgeConfig.ctx ?? 8192) - (judgeConfig.predict ?? 700) - 1500) * 3)
+      const groups = {}
+      for (const row of rows) (groups[`${row.id}#${row.run}`] ??= []).push(row)
+      for (const group of Object.values(groups)) {
+        const excerpts = []
+        const toolResults = []
+        const queries = []
+        for (const row of group.sort((a, b) => a.turn - b.turn)) {
+          if (row.context) excerpts.push(row.context)
+          if (row.toolResults) toolResults.push(row.toolResults)
+          const fitted = fitContext(excerpts, maxChars)
+          units.push({ key: `multiquery-${row.id}-r${row.run}-t${row.turn}`, category, rows: [row], context: fitted.text, contextTrimmed: fitted.trimmed, toolResults: toolResults.join('\n'), priorQueries: [...queries] })
+          queries.push(row.query)
+        }
+      }
     } else {
       for (const row of rows) units.push({ key: `${category}-${row.id}-r${row.run}-t${row.turn}`, category, rows: [row] })
     }
   }
   if (units.length) {
-    log({ judge: judgeConfig.constant, units: units.length, batch: judgeConfig.batch }, 'judge starting')
+    log({ judge: judgeName, backend: judgeBackend, units: units.length, batch: judgeConfig.batch }, 'judge starting')
     const t0 = Date.now()
-    verdicts = await judge({ units, config: judgeConfig, log: { info: (f, m) => log(f, m), warn: (f, m) => log(f, m) }, onVerdict: writeVerdict })
+    verdicts = await judge({ units, config: judgeConfig, backend: judgeBackend, log: { info: (f, m) => log(f, m), warn: (f, m) => log(f, m) }, onVerdict: writeVerdict })
     log({ verdicts: verdicts.length, ms: Date.now() - t0 }, 'judge done')
   }
 }

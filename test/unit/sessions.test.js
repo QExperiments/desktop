@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createSessions } from '../../src/http/sessions.js'
+import { createSessions, isSessionId } from '../../src/http/sessions.js'
 
 let dir
 before(async () => { dir = await mkdtemp(join(tmpdir(), 'sessions-')) })
@@ -37,7 +37,8 @@ test('context replays the messages the model saw and the chunks it was shown', a
   await sessions.append('s3', turn('MOQ?', 'MOQ is 500.', { messages, shown: ['a.txt::0'] }))
   await sessions.append('s3', turn('And lead time?', '6 weeks', { messages: [{ role: 'user', content: 'And lead time?' }, { role: 'assistant', content: '6 weeks' }], shown: [] }))
   const context = await sessions.context('s3')
-  assert.deepEqual(context.shown, ['a.txt::0'])
+  assert.deepEqual(context.shown, [{ at: 0, ids: ['a.txt::0'] }])
+  assert.equal(context.base, 0)
   assert.equal(context.messages.length, 6)
   assert.deepEqual(context.messages.slice(0, 4), messages)
   assert.deepEqual(context.messages.at(-1), { role: 'assistant', content: '6 weeks' })
@@ -62,5 +63,24 @@ test('ids outside the safe alphabet are ignored, never written', async () => {
   assert.equal(await sessions.append('../etc/passwd', turn('x', 'y')), null)
   assert.equal(await sessions.get('../etc/passwd'), null)
   assert.deepEqual(await sessions.history('nope'), [])
-  assert.deepEqual(await sessions.context('nope'), { messages: [], shown: [] })
+  assert.deepEqual(await sessions.context('nope'), { messages: [], shown: [], base: 0 })
+})
+
+test('remove forgets a session and reports whether there was one', async () => {
+  const sessions = createSessions(dir)
+  await sessions.append('gone', turn('Q?', 'A'))
+  assert.equal(await sessions.remove('gone'), true)
+  assert.equal(await sessions.get('gone'), null)
+  assert.equal(await sessions.remove('gone'), false)
+  assert.equal(await sessions.remove('../etc/passwd'), false)
+  assert.ok(!(await sessions.list()).some((s) => s.id === 'gone'))
+})
+
+test('isSessionId accepts the KV-cache alphabet only', () => {
+  assert.equal(isSessionId('chat-abc.1_2'), true)
+  assert.equal(isSessionId('x'.repeat(64)), true)
+  assert.equal(isSessionId('x'.repeat(65)), false)
+  assert.equal(isSessionId('a/b'), false)
+  assert.equal(isSessionId(''), false)
+  assert.equal(isSessionId(undefined), false)
 })

@@ -5,9 +5,8 @@ import { answer, kvCacheKey } from '../chat/answer.js'
 import { config } from '../config.js'
 import { treeRss } from '../system/rss.js'
 import { registerMedia } from './media.js'
-import { createSessions } from './sessions.js'
+import { createSessions, isSessionId } from './sessions.js'
 import { createTraces } from './trace.js'
-import { registerUi } from './ui.js'
 
 const openaiError = (reply, code, message, type) =>
   reply.code(code).send({ error: { message, type, code } })
@@ -30,8 +29,26 @@ export const createServer = (runtime) => {
     if (stale.length) app.log.info({ deleted: stale.length, kept: config.cachedSessions }, 'kv-cache pruned')
   }
 
+  // When the chat model is unloaded after residentIdleMs, the sessions' KV
+  // files go with it: reloaded, the SDK would prefill the whole history on top
+  // of the file it loads and double the context (see runtime unloadIdle). A
+  // fresh file from the stored turns costs one prefill and nothing else.
+  runtime.onIdleUnload?.(async (role) => {
+    if (role !== 'chat') return
+    const ids = (await sessions.list()).map(({ id }) => id)
+    for (const id of ids) await runtime.deleteCache(kvCacheKey(id))
+    app.log.info({ deleted: ids.length }, 'kv-cache dropped with the idle chat model')
+  })
+
   app.register(multipart, { limits: { fileSize: 32 * 1024 * 1024 } })
-  app.register(async (scope) => registerUi(scope, runtime))
+  // The chat page and test console are optional: MERIDIAN_UI=0 leaves them out
+  // at run time, `npm run build -- --no-ui` leaves ui.js (ejs, @fastify/view)
+  // out of the bundle, and such a bundle logs once and serves the API alone.
+  if (config.ui) {
+    app.register(async (scope) => import('./ui.js')
+      .then((ui) => ui.registerUi(scope, runtime))
+      .catch((error) => app.log.warn({ err: error.message }, 'ui not in this build; serving the API only')))
+  }
   app.register(async (scope) => registerMedia(scope, runtime, sessions))
 
   app.get(`${api}/models`, (_request, reply) => {
@@ -44,12 +61,31 @@ export const createServer = (runtime) => {
     }
   })
 
+  // Every role and tier of models.json: what is provisioned, what the QVAC
+  // registry knows (from `npm run models:list -- --refresh`) and which tiers
+  // this machine's RAM affords. Read-only; downloading stays a setup step.
+  app.get(`${api}/models/catalog`, () => runtime.modelCatalog())
+
   app.get('/health', () => runtime.snapshot())
 
   // Earlier chats, for the chat page. Text, voice and image turns all land here.
   app.get(`${api}/sessions`, () => sessions.list())
   app.get(`${api}/sessions/:id`, async (request, reply) =>
     (await sessions.get(request.params.id)) ?? openaiError(reply, 404, `no session ${request.params.id}`, 'not_found'))
+
+  // Forget a chat: its stored turns and its KV-cache file. The chat page's
+  // delete button lands here; so can an IT script that clears a laptop.
+  app.delete(`${api}/sessions/:id`, async (request, reply) => {
+    const { id } = request.params
+    if (!(await sessions.remove(id))) return openaiError(reply, 404, `no session ${id}`, 'not_found')
+    const cache = await runtime.deleteCache(kvCacheKey(id))
+    // The direct engine keeps its own checkpoint per session; it goes too.
+    if (config.retrieval.engine === 'direct') {
+      await runtime.directChat().then((engine) => engine.drop(id)).catch((error) => request.log.warn(error))
+    }
+    request.log.info({ session: id, cache: cache?.success !== false }, 'session deleted')
+    return { id, deleted: true, cache_deleted: cache?.success !== false }
+  })
 
   app.post(`${api}/cancel/:requestId`, async (request, reply) => {
     const entry = await runtime.cancel(request.params.requestId)
@@ -64,18 +100,25 @@ export const createServer = (runtime) => {
     if (typeof query !== 'string' || query.trim() === '') {
       return openaiError(reply, 400, 'messages must end with a user message carrying text content', 'invalid_request_error')
     }
-    // A session key (OpenAI's `user` field or an x-session-id header) lets the
-    // SDK keep the KV state between calls. With a session the stored turns are
+    // Only an x-session-id header names a session (see sessions.js for why the
+    // OpenAI `user` field is not read). With a session the stored turns are
     // the model's history: they hold the messages exactly as the model saw
-    // them, which the cache needs to line up, so the client's earlier turns are
-    // ignored and only its last query is used. Without a session the client's
-    // history goes to the model as sent; the chat model's ctx_size is the bound.
-    const session = typeof request.body?.user === 'string' ? request.body.user : headerValue(request.headers['x-session-id'])
+    // them, which the KV cache needs to line up, so the client's earlier turns
+    // are ignored and only its last query is used. Without a session the
+    // client's history goes to the model as sent, stateless like Chat
+    // Completions; the chat model's ctx_size is the bound.
+    const session = headerValue(request.headers['x-session-id']) || undefined
+    if (session !== undefined && !isSessionId(session)) {
+      return openaiError(reply, 400, 'x-session-id must be 1 to 64 characters of letters, digits, _ . or -', 'invalid_request_error')
+    }
     const stored = session ? await sessions.context(session) : null
     const prior = stored
       ? stored.messages
       : messages.slice(0, lastUser).filter((message) => (message?.role === 'user' || message?.role === 'assistant') && typeof message.content === 'string')
     const shown = stored?.shown ?? []
+    // The base the session's last turn ran with: which of the stored
+    // excerpts the KV state still holds (src/chat/answer.js).
+    const base = stored?.base ?? 0
 
     const id = `chatcmpl-${randomUUID()}`
     const created = Math.floor(Date.now() / 1000)
@@ -87,13 +130,13 @@ export const createServer = (runtime) => {
       const rss = await treeRss()
       const stats = { ...result.stats, rss }
       if (session) {
-        const turn = { kind: 'text', query, answer: result.text, citations: result.citations, messages: result.messages, shown: result.hits.filter((hit) => !hit.reused).map((hit) => hit.id), requestId: id, usage: result.usage, stats }
+        const turn = { kind: 'text', query, answer: result.text, citations: result.citations, messages: result.messages, shown: result.hits.filter((hit) => !hit.reused).map((hit) => hit.id), base: result.base, requestId: id, usage: result.usage, stats }
         sessions.append(session, turn)
           .then((saved) => (saved?.turns.length === 1 ? pruneCaches() : null))
           .catch((error) => request.log.warn(error))
       }
       if (evalRun) {
-        const trace = { id, run: evalRun, session: session ?? null, at: new Date().toISOString(), query, text: result.text, citations: result.citations, hits: result.hits, messages: result.messages, rounds: result.rounds, usage: result.usage, stats }
+        const trace = { id, run: evalRun, session: session ?? null, at: new Date().toISOString(), query, text: result.text, citations: result.citations, hits: result.hits, messages: result.messages, rounds: result.rounds, retrieval: result.retrieval, usage: result.usage, stats }
         await traces.write(evalRun, id, trace).catch((error) => request.log.warn(error))
       }
       const { tool_calls, ...numbers } = stats
@@ -121,6 +164,7 @@ export const createServer = (runtime) => {
           messages: [...prior, { role: 'user', content: query }],
           session,
           shown,
+          base,
           generationParams,
           onDelta: (content) => {
             if (first && content.trim() === '') return // the model's leading blank lines
@@ -146,7 +190,7 @@ export const createServer = (runtime) => {
       return reply
     }
 
-    const result = await answer(runtime, { messages: [...prior, { role: 'user', content: query }], session, shown, generationParams })
+    const result = await answer(runtime, { messages: [...prior, { role: 'user', content: query }], session, shown, base, generationParams })
     const { text, citations } = result
     const stats = await settle(result)
 

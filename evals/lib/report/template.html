@@ -42,7 +42,7 @@ const root = document.getElementById('root')
 const section = (title, ...kids) => root.append($('h2', {}, title), ...kids)
 
 document.getElementById('title').textContent = `Eval report ${H.ts || ''}`
-document.getElementById('sub').textContent = `${H.hardware?.cpu || '?'} · ${gb(H.hardware?.totalBytes)} RAM · ${H.hardware?.backend || '?'} · tier ${H.tier} · chat ${H.chatModel || '?'} · embed ${H.embedModel || '?'} · ${H.runs} run(s) · cold start ${ms(H.coldStartMs)} · ${M.latency?.n ?? 0} live turns, ${M.latency?.errors ?? 0} errors · judge ${H.judge || 'off'}`
+document.getElementById('sub').textContent = `${H.hardware?.cpu || '?'} · ${gb(H.hardware?.totalBytes)} RAM · ${H.hardware?.backend || '?'} · tier ${H.tier} · chat ${H.chatModel || '?'} · embed ${H.embedModel || '?'} · ${H.runs} run(s)${H.variant ? ` · variant ${H.variant} (${Object.entries(H.serverEnv || {}).map(([k, v]) => `${k}=${v}`).join(' ') || 'defaults'})` : ''} · cold start ${ms(H.coldStartMs)} · ${M.latency?.n ?? 0} live turns, ${M.latency?.errors ?? 0} errors · judge ${H.judge || 'off'}`
 
 // ---- headline ----------------------------------------------------------
 const L = M.latency || {}
@@ -51,10 +51,15 @@ section('Latency, all live turns', table(['ttft p50', 'ttft p95', 'ttft client p
 
 const textRow = (s) => [{ text: pct(s.must_rate), cls: cls(s.must_rate) }, { text: pct(s.number_match_mean), cls: cls(s.number_match_mean) }, { text: pct(s.grounded_rate), cls: cls(s.grounded_rate) }, pct(s.citation_precision_mean), pct(s.lang_rate), { text: pct(s.empty_rate), cls: cls(s.empty_rate, 0.95, 0.8, true) }, { text: pct(s.leak_rate), cls: cls(s.leak_rate, 0.95, 0.8, true) }, pct(s.abstained_rate)]
 const textHead = ['must', 'number match', 'grounded', 'citation precision', 'lang', 'empty', 'leak', 'abstained']
-const cats = ['single', 'abstain', 'tools', 'memory', 'multiturn'].filter((c) => M[c])
+const cats = ['single', 'abstain', 'tools', 'memory', 'multiturn', 'multiquery'].filter((c) => M[c])
 if (cats.length) section('Code metrics by category', table(['category', 'turns', ...textHead, 'ttft p50', 'total p50'], cats.map((c) => [c, M[c].n ?? M[c].latency?.n, ...textRow(M[c]), ms(M[c].latency?.ttft_p50), ms(M[c].latency?.total_p50)]), [1,2,3,4,5,6,7,8,9,10,11]))
 
-if (M.retrieval) section('Retrieval (no model)', table(['queries', 'recall@k', 'precision@k', 'MRR', 'hit@1', 'retrieval ms p50'], [[M.retrieval.n, { text: pct(M.retrieval.recall_at_k), cls: cls(M.retrieval.recall_at_k) }, pct(M.retrieval.precision_at_k), num(M.retrieval.mrr, 2), pct(M.retrieval.hit_at_1), ms(M.retrieval.retrieval_ms_p50)]], [0,1,2,3,4,5]))
+if (M.retrieval) {
+  const r = M.retrieval
+  section('Retrieval (no model)',
+    table(['k (chunks)', 'recall@k', 'precision@k', 'hit@k'], r.ks.map((k) => [k, { text: pct(r.at[k].recall), cls: cls(r.at[k].recall) }, pct(r.at[k].precision), { text: pct(r.at[k].hit), cls: cls(r.at[k].hit) }]), [0,1,2,3]),
+    $('div', { class: 'small' }, `${r.n} queries · MRR ${num(r.mrr, 2)} · retrieval ms p50 ${ms(r.retrieval_ms_p50)}. Each row is its own search(query, k): k counts fused chunks, exactly what the chat would show the model with CHAT_TOPK = k (today 3, src/chat/answer.js). recall = share of the gold files among the top-k chunks, precision = share of those chunks from a gold file, hit = at least one gold file. MRR and the gold ranks below come from the k = 10 search.`))
+}
 
 if (M.single?.judge) {
   const j = M.single.judge
@@ -71,7 +76,7 @@ if (M.tools) {
   section('Tools', table(['cases', 'routing precision', 'routing recall', 'tp / wrong / fp / fn / tn', 'args match', 'wrong tool', 'must', 'rounds mean', 'repeat calls', 'limit hits', 'tool errors'],
     [[t.n, { text: pct(t.routing.precision), cls: cls(t.routing.precision) }, { text: pct(t.routing.recall), cls: cls(t.routing.recall) }, `${t.routing.tp} / ${t.routing.wrong} / ${t.routing.fp} / ${t.routing.fn} / ${t.routing.tn}`, pct(t.args_subset_rate), pct(t.wrong_tool_rate), pct(t.must_rate), num(t.rounds_mean, 2), t.repeat_calls, t.limit_hits, t.tool_errors]], [0,1,2,4,5,6,7,8,9,10]))
 }
-const toolStats = ['memory', 'multiturn', 'stress'].filter((c) => M[c]?.stats)
+const toolStats = ['memory', 'multiturn', 'multiquery', 'stress'].filter((c) => M[c]?.stats)
 if (toolStats.length) section('Tool statistics in sessions', table(['category', 'turns', 'calls', 'calls per turn', 'turns with tool', 'per tool', 'rounds mean', 'repeat calls', 'limit hits', 'tool errors', 'tool ms total'], toolStats.map((c) => { const s = M[c].stats; return [c, s.turns, s.calls, s.calls_per_turn, pct(s.turns_with_tool), kv(s.per_tool), s.rounds_mean, s.repeat_calls, s.limit_hits, s.tool_errors, s.tool_ms_total] }), [1,2,3,4,6,7,8,9,10]))
 
 if (M.memory) {
@@ -85,9 +90,28 @@ if (M.multiturn) {
   section('Multiturn', table(['sessions', 'follow-ups', 'followup resolution', 'consistency pairs', 'consistency', 'must', 'routing precision', 'routing recall'],
     [[m.n_sessions, m.n_followups, { text: pct(m.followup_resolution), cls: cls(m.followup_resolution) }, m.n_pairs, { text: pct(m.consistency), cls: cls(m.consistency) }, pct(m.must_rate), pct(m.routing?.precision), pct(m.routing?.recall)]], [0,1,2,3,4,5,6,7]))
 }
+if (M.multiquery) {
+  const m = M.multiquery
+  const k = m.k
+  const rowOf = (label, b) => [label, b.n, { text: pct(b.recall), cls: cls(b.recall) }, pct(b.precision), { text: pct(b.hit), cls: cls(b.hit) }, num(b.mrr, 2), { text: pct(b.evidence_in_context), cls: cls(b.evidence_in_context) }, pct(b.context_recall)]
+  section(`Multiquery: retrieval as the model saw it (k = ${k} chunks)`,
+    table(['turns', 'n', `recall@${k}`, `precision@${k}`, `hit@${k}`, 'MRR', 'evidence in context', 'context recall'], [rowOf('all with gold', m.all), rowOf('standalone', m.standalone), rowOf('follow-up', m.followup)], [1,2,3,4,5,6,7]),
+    $('div', { class: 'small' }, `${m.n_sessions} sessions, ${m.n_turns} turns, ${m.no_answer.n} of them expecting a refusal. Hits are trace.hits, the search(query, ${k}) the chat put in front of the model: recall = share of the gold files among those chunks, precision = share of the chunks from a gold file, MRR over chunk ranks. evidence in context = a gold file is among this turn's hits or was shown earlier in the session; context recall = share of the gold files the model can read at this turn. follow-up = elliptical query ("and P2?") retrieved as typed, no rewriting.`),
+    $('h3', {}, 'Turns whose right answer is a refusal (gold empty)'),
+    table(['n', 'abstained (code)', 'grounded (code)', 'judge refused', 'judge hallucination', 'judge answered'], [[m.no_answer.n, { text: pct(m.no_answer.abstained_rate), cls: cls(m.no_answer.abstained_rate) }, pct(m.no_answer.grounded_rate), m.judge_no_answer ? { text: pct(m.judge_no_answer.refused_rate), cls: cls(m.judge_no_answer.refused_rate) } : 'n/a', m.judge_no_answer ? { text: pct(m.judge_no_answer.hallucination_rate), cls: cls(m.judge_no_answer.hallucination_rate, 0.9, 0.6, true) } : 'n/a', m.judge_no_answer ? kv(m.judge_no_answer.answered) : 'n/a']], [0,1,2,3,4]))
+  if (m.judge) {
+    const j = m.judge
+    root.append($('h3', {}, `Judge on every turn (${H.judge || 'judge'}), context accumulated over the session`),
+      table(['verdicts', 'parse ok', 'faithfulness', 'hallucination', 'evidence verified', 'answered', 'relevance', 'gold turns: faith / halluc', 'context trimmed', 'kappa vs labels', 'ms per verdict', 'cost USD'],
+        [[j.n, pct(j.parse_ok_rate), { text: pct(j.faithfulness_mean), cls: cls(j.faithfulness_mean) }, { text: pct(j.hallucination_rate), cls: cls(j.hallucination_rate, 0.9, 0.6, true) }, pct(j.evidence_verified_mean), kv(j.answered), kv(j.relevance), m.judge_gold ? `${pct(m.judge_gold.faithfulness_mean)} / ${pct(m.judge_gold.hallucination_rate)}` : 'n/a', j.trimmed_units, j.kappa ? kv(j.kappa) : 'no labels yet', num(j.ms_mean), fin(j.cost_usd) ? j.cost_usd.toFixed(2) : 'local']], [0,1,2,3,4,8,10,11]))
+  }
+  const byTurn = m.context_tokens_by_turn || []
+  root.append($('h3', {}, 'Context by turn (mean over sessions still running at that turn)'),
+    table(['turn', ...byTurn.map((t) => t.turn)], [['sessions', ...byTurn.map((t) => t.n)], ['context tokens', ...byTurn.map((t) => num(t.context))], ['cached tokens', ...byTurn.map((t) => num(t.cached))], ['ttft ms', ...byTurn.map((t) => num(t.ttft))]]))
+}
 if (M.stress) {
-  section('Stress', table(['session', 'turns', 'errors', 'empty', 'ttft p50 / p95', 'tps p50', 'total p50 / p95', 'ttft slope ms/turn', 'rss tree peak', 'rss slope B/s', 'system used slope B/s', 'ctx hit'],
-    M.stress.sessions.map((s) => [`${s.id} r${s.run}`, s.turns, { text: pct(s.error_rate), cls: cls(s.error_rate, 0.99, 0.9, true) }, pct(s.empty_rate), `${ms(s.ttft_p50)} / ${ms(s.ttft_p95)}`, num(s.tps_p50, 1), `${ms(s.total_p50)} / ${ms(s.total_p95)}`, num(s.ttft_slope_ms_per_turn, 1), gb(s.memory.rss_tree_peak), num(s.memory.rss_tree_slope_bps), num(s.memory.system_used_slope_bps), s.ctx_hit_turn ? `turn ${s.ctx_hit_turn.turn} (${s.ctx_hit_turn.what}, ${s.ctx_hit_turn.prompt_tokens} tokens)` : 'none']), [1,2,3,5,7,8,9,10]),
+  section('Stress', table(['session', 'turns', 'errors', 'empty', 'ttft p50 / p95', 'tps p50', 'total p50 / p95', 'ttft slope ms/turn', 'rss tree peak', 'rss slope B/s', 'footprint slope B/s', 'ctx hit'],
+    M.stress.sessions.map((s) => [`${s.id} r${s.run}`, s.turns, { text: pct(s.error_rate), cls: cls(s.error_rate, 0.99, 0.9, true) }, pct(s.empty_rate), `${ms(s.ttft_p50)} / ${ms(s.ttft_p95)}`, num(s.tps_p50, 1), `${ms(s.total_p50)} / ${ms(s.total_p95)}`, num(s.ttft_slope_ms_per_turn, 1), gb(s.memory.rss_tree_peak), num(s.memory.rss_tree_slope_bps), num(s.memory.footprint_bare_slope_bps), s.ctx_hit_turn ? `turn ${s.ctx_hit_turn.turn} (${s.ctx_hit_turn.what}, ${s.ctx_hit_turn.prompt_tokens} tokens)` : 'none']), [1,2,3,5,7,8,9,10]),
     $('div', { class: 'small' }, `rss peak spread between sessions: ${pct(M.stress.rss_peak_spread)}`))
   for (const s of M.stress.sessions) root.append($('details', {}, $('summary', {}, `${s.id} r${s.run}: context tokens by turn`), table(['turn', ...s.prompt_tokens_by_turn.map((t) => t.turn)], [['context', ...s.prompt_tokens_by_turn.map((t) => t.tokens)], ['cached', ...s.cached_tokens_by_turn.map((t) => t.tokens ?? 'n/a')]])))
 }
@@ -95,16 +119,16 @@ if (M.stress) {
 // ---- hardware ----------------------------------------------------------
 if (M.hardware) {
   const ph = M.hardware.phases
-  section('Hardware by phase', table(['phase', 'samples', 'rss tree peak', 'rss tree mean', 'rss bare peak', 'system used mean', 'system used peak', 'cpu % mean', 'gpu % mean'],
-    Object.entries(ph).map(([p, v]) => [p, v.samples, gb(v.rss_tree_peak), gb(v.rss_tree_mean), gb(v.rss_bare_peak), gb(v.system_used_mean), gb(v.system_used_peak), num(v.cpu_mean), num(v.gpu_util_mean)]), [1,2,3,4,5,6,7,8]),
-    $('div', { class: 'small' }, `System memory used: +${gb(M.hardware.system_used_delta_load)} after load; ${gb(M.hardware.system_used_delta_after_unload)} above base after unload. RSS undercounts mmap'd weights on Apple Silicon; system used is the fleet-relevant number, rss tree the process-only one.`))
-  // SVG polyline: rss tree and system used over time, phase bands behind.
+  section('Hardware by phase', table(['phase', 'samples', 'rss tree peak', 'rss tree mean', 'rss bare peak', 'footprint bare peak', 'cpu % mean', 'gpu % mean'],
+    Object.entries(ph).map(([p, v]) => [p, v.samples, gb(v.rss_tree_peak), gb(v.rss_tree_mean), gb(v.rss_bare_peak), gb(v.footprint_bare_peak), num(v.cpu_mean), num(v.gpu_util_mean)]), [1,2,3,4,5,6,7]),
+    $('div', { class: 'small' }, 'rss tree = node + bare worker, resident pages, weights included: what the app needs in RAM to run at full speed. footprint bare = what the worker owns outright (KV cache, compute buffers, runtime), without the mmap\'d weights; this is Activity Monitor\'s Memory column, so it undercounts a running model. rss bare minus footprint bare is the weights.'))
+  // SVG polyline: rss tree and bare footprint over time, phase bands behind.
   const rows = D.hardware.filter((h) => fin(h.t))
   if (rows.length > 1) {
     const W = 1100, Hh = 240, pad = 40
     const t0 = rows[0].t, t1 = rows[rows.length - 1].t
     const x = (t) => pad + (t - t0) / Math.max(1, t1 - t0) * (W - 2 * pad)
-    const series = [['rss_tree', '#1f6feb'], ['system_used', '#b3261e']]
+    const series = [['rss_tree', '#1f6feb'], ['footprint_bare', '#b3261e']]
     const max = Math.max(...rows.flatMap((r) => series.map(([k]) => r[k] || 0)), 1)
     const y = (v) => Hh - pad / 2 - (v / max) * (Hh - pad)
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
@@ -130,24 +154,32 @@ if (M.hardware) {
       label.setAttribute('x', 4); label.setAttribute('y', y(max * frac) + 4); label.setAttribute('font-size', '11'); label.textContent = gb(max * frac)
       svg.append(label)
     }
-    root.append(svg, $('div', { class: 'legend small' }, $('span', {}, $('i', { style: 'background:#1f6feb' }), 'rss tree (node + bare)'), $('span', {}, $('i', { style: 'background:#b3261e' }), 'system memory used'), $('span', {}, 'bands: grey before load / after unload, blue idle, yellow generating')))
+    root.append(svg, $('div', { class: 'legend small' }, $('span', {}, $('i', { style: 'background:#1f6feb' }), 'rss tree (node + bare)'), $('span', {}, $('i', { style: 'background:#b3261e' }), 'footprint bare (KV + buffers)'), $('span', {}, 'bands: grey before load / after unload, blue idle, yellow generating')))
   }
 }
 
 // ---- per turn ----------------------------------------------------------
 const verdictBy = Object.fromEntries(D.verdicts.map((v) => [`${v.category}#${v.id}#${v.run}#${v.turn}`, v]))
 const yesno = (v) => v === true ? { text: 'yes', cls: 'ok' } : v === false ? { text: 'no', cls: 'bad' } : 'n/a'
-for (const cat of ['retrieval', 'single', 'abstain', 'tools', 'memory', 'multiturn', 'stress']) {
+for (const cat of ['retrieval', 'single', 'abstain', 'tools', 'memory', 'multiturn', 'multiquery', 'stress']) {
   const rows = D.turns.filter((t) => t.category === cat)
   if (!rows.length) continue
   const details = $('details', {}, $('summary', {}, `${cat}: ${rows.length} turns`))
   if (cat === 'retrieval') {
-    details.append(table(['id', 'query', 'gold', 'top files', 'recall', 'MRR', 'ms'], rows.map((r) => [r.id, r.query, (r.gold || []).join(', '), (r.files || []).join(', '), { text: pct(r.recall), cls: cls(r.recall) }, num(r.mrr, 2), r.retrieval_ms]), [4,5,6]))
+    const ks = rows[0].ks || [1, 3, 5, 7, 10]
+    details.append(table(['id', 'query', 'gold (rank of first chunk)', 'top files', ...ks.map((k) => `recall@${k}`), 'MRR', 'ms'], rows.map((r) => [r.id, r.query, (r.gold_ranks || []).map((g) => `${g.file} (${g.rank ?? 'miss'})`).join(', '), (r.files || []).join(', '), ...ks.map((k) => ({ text: pct(r.at?.[k]?.recall), cls: cls(r.at?.[k]?.recall) })), num(r.mrr, 2), r.retrieval_ms]), [...ks.map((_, i) => 4 + i), 4 + ks.length, 5 + ks.length]))
+  } else if (cat === 'multiquery') {
+    const k = M.multiquery?.k ?? 3
+    details.append(table(['id', 'turn', 'follow-up', 'query', 'answer', 'gold (chunk rank)', `hits (k = ${k}, * = shown earlier)`, `recall@${k}`, 'evidence in ctx', 'abstained', 'judge', 'ttft', 'total', 'prompt / cached / completion / retrieval≈'], rows.map((r) => {
+      const v = verdictBy[`${cat}#${r.id}#${r.run}#${r.turn}`]
+      const judge = v ? (v.parse_ok ? `${v.verdict.answered} · faith ${pct(v.derived?.faithfulness)}${v.derived?.hallucination ? ' · HALLUCINATION' : ''}${v.context_trimmed ? ` · ctx trimmed ${v.context_trimmed}` : ''}` : 'parse error') : ''
+      return [r.id, r.turn, r.followup ? 'yes' : '', $('div', { class: 'answer' }, r.query), $('div', { class: 'answer' }, r.error ? `ERROR ${r.status}: ${r.error}` : r.text), r.has_gold ? (r.gold_ranks || []).map((g) => `${g.file.split('/').pop()} (${g.rank ?? 'miss'})`).join(', ') : '(refusal expected)', (r.hits || []).map((h) => h.file.split('/').pop() + (h.reused ? '*' : '')).join(', '), r.has_gold ? { text: pct(r.recall), cls: cls(r.recall) } : 'n/a', r.has_gold ? yesno(r.evidence_in_context) : 'n/a', r.abstained ? { text: 'yes', cls: r.has_gold ? 'bad' : 'ok' } : { text: 'no', cls: r.has_gold ? '' : 'bad' }, judge, ms(r.stats?.ttft_ms), ms(r.wall_ms), r.usage ? `${r.usage.prompt_tokens} / ${r.usage.prompt_tokens_details?.cached_tokens ?? 0} / ${r.usage.completion_tokens} / ~${Math.round((r.context || '').length / 4)}` : 'n/a']
+    }), [1,7,11,12]))
   } else {
-    details.append(table(['id', 'run', 'turn', 'query', 'answer', 'citations', 'tools', 'must', 'grounded', 'abstained', 'judge', 'ttft', 'total', 'prompt / cached / completion'], rows.map((r) => {
+    details.append(table(['id', 'run', 'turn', 'query', 'answer', 'citations', 'tools', 'must', 'grounded', 'abstained', 'judge', 'ttft', 'total', 'prompt / cached / completion / retrieval≈'], rows.map((r) => {
       const v = verdictBy[`${cat}#${r.id}#${r.run}#${r.turn}`]
       const judge = v ? (v.parse_ok ? `${v.verdict.answered ?? v.verdict.behaviour ?? ''} / ${v.verdict.correct ?? ''} · faith ${pct(v.derived?.faithfulness)}${v.derived?.hallucination ? ' · HALLUCINATION' : ''}` : `parse error`) : ''
-      return [r.id, r.run, r.turn, $('div', { class: 'answer' }, r.query), $('div', { class: 'answer' }, r.error ? `ERROR ${r.status}: ${r.error}` : r.text), (r.citations || []).map((c) => c.file + (c.reused ? '*' : '')).join(', '), (r.tool_calls || []).map((c) => `${c.name}(${JSON.stringify(c.args || {})})${c.error ? ' ✗' : ''}`).join(' '), yesno(r.must), yesno(r.grounded), r.abstained ? 'yes' : 'no', judge, ms(r.stats?.ttft_ms), ms(r.wall_ms), r.usage ? `${r.usage.prompt_tokens} / ${r.usage.prompt_tokens_details?.cached_tokens ?? 0} / ${r.usage.completion_tokens}` : 'n/a']
+      return [r.id, r.run, r.turn, $('div', { class: 'answer' }, r.query), $('div', { class: 'answer' }, r.error ? `ERROR ${r.status}: ${r.error}` : r.text), (r.citations || []).map((c) => c.file + (c.reused ? '*' : '')).join(', '), (r.tool_calls || []).map((c) => `${c.name}(${JSON.stringify(c.args || {})})${c.error ? ' ✗' : ''}`).join(' '), yesno(r.must), yesno(r.grounded), r.abstained ? 'yes' : 'no', judge, ms(r.stats?.ttft_ms), ms(r.wall_ms), r.usage ? `${r.usage.prompt_tokens} / ${r.usage.prompt_tokens_details?.cached_tokens ?? 0} / ${r.usage.completion_tokens} / ~${Math.round((r.context || '').length / 4)}` : 'n/a']
     }), [1,2,11,12]))
   }
   root.append($('h2', {}, `Turns: ${cat}`), details)

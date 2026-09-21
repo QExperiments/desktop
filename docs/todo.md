@@ -8,6 +8,8 @@ Claude-симуляции вынесены в [eval-sim-plan.md](eval-sim-plan.m
 
 ### Решено, делать
 
+Открытые пункты перенесены в [todo-2.md](todo-2.md); здесь остаётся сделанное.
+
 - [x] **Сначала: не ломать KV-cache.** Сейчас контекст ретривала подшивается в system
       prompt, а SDK кладёт hash(system prompt + tools) в имя KV-файла и сравнивает историю
       под ключом. Итог: новый файл и полный prefill каждый ход (78 файлов, 2.9 GB на dev-Mac).
@@ -70,16 +72,7 @@ Claude-симуляции вынесены в [eval-sim-plan.md](eval-sim-plan.m
 
 ### Отложено / идеи
 
-- [ ] Каталог моделей (реестр + локальные, подсветка по бюджету). Решение: только
-      CLI `models:list --refresh` + один `GET /v1/models/catalog`, без скачивания
-      из сервера. Идея отложена.
-- [ ] UI вне установщика: флаг + dynamic import + esbuild external, ~6 строк.
-- [ ] Эндпоинт удаления сессии (вопрос для Raj).
-- [ ] Установщик: запуск на Bare вместо требования Node 22; сборка без голоса
-      (минус аддоны asr + tts, примерно треть от 72 MB); zip.
-- [ ] Альтернативные chat-модели для M. Gemma 4 отпала: в реестре E2B Q4_K_M весит 3.46 GB
-      (per-layer embeddings в файле), E4B 5.41 GB, в бюджет M на 8 GB не входит. LFM2.5-2.6B в
-      реестре нет. Остаётся сравнение квантов Qwen3.5-2B и Qwen3.5-9B как «XL» для ≥ 16 GB.
+Открытые пункты перенесены в [todo-2.md](todo-2.md).
 
 ## Evals (`evals/` в корне)
 
@@ -220,7 +213,7 @@ Judge это локальная модель побольше, корпус не
 
 | # | Файл | Вход | Обработка | Метрики кодом | Метрики judge |
 | --- | --- | --- | --- | --- | --- |
-| 1 | retrieval | `query`, `gold_doc_ids`, `k` (по умолчанию 3) | без LLM: прямой вызов `search(query, k)`, дёшево | recall@k, precision@k, MRR, hit@1, retrieval_ms | нет |
+| 1 | retrieval | `query`, `gold_doc_ids` | без LLM: по одному `search(query, k)` на k = 1/3/5/7/10 (k считает чанки, как их подаёт чат; RRF-порядок зависит от глубины, поэтому не один глубокий поиск со срезом), дёшево | recall@k, precision@k, hit@k, MRR, retrieval_ms | нет |
 | 2 | single | `query`, `gold_doc_ids`, `reference` (эталон одной фразой), `must` regex | полный путь через `serve`; трейс даёт hits и stats | must, number_match, citation_precision, grounded, lang, leak, empty | claims → faithfulness, answered, correct vs `reference`, relevance |
 | 3 | abstain | `query`, `kind`: out_of_corpus / future / near_miss (P4, когда есть только P1–P3) | как 2; вместе с 2 даёт abstain precision/recall (ложные отказы на single, ложные ответы на abstain) | abstained (regex отказа), tool not called, grounded=false | behaviour, invented_facts → hallucination, says_why, next_step |
 | 4 | tools | `messages` (история), эталон: `tool` name или null, `args` только значимые, `must` | трейс: `rounds[].tool_calls` | routing precision/recall по всему набору, args_subset_match, wrong_tool, rounds, repeat_calls, limit_hits, число из результата тула попало в ответ | не нужен |
@@ -374,7 +367,10 @@ hallucination (3), доля разрешённых отсылок, доля пр
 (`serve:stop`, `system_used` должен вернуться к базе).
 
 Модели работают в дочернем процессе `bare`, не в node: node 40 MB, bare 455 MB в простое
-и 600 MB в запросе при 1.5 GB весов. RSS недосчитывает mmap-веса, поэтому две колонки.
+и 600 MB в запросе при 1.5 GB весов. Перемер 2026-09-18 (`ps rss` против `footprint -p` на bare-воркере,
+tier M): rss 2.03 GB, phys_footprint 0.53 GB, разница 1.5 GB = mmap-веса как resident file-backed страницы.
+То есть RSS веса **учитывает**, а footprint (колонка Memory в Activity Monitor) нет. В отчёте теперь rss tree
+и footprint bare; system used убран из отчёта как шум всей машины (в hardware.jsonl остаётся).
 
 ### Порядок работ
 
@@ -387,12 +383,15 @@ hallucination (3), доля разрешённых отсылок, доля пр
 5. [x] Judge по single: schemas, prompts, kappa в отчёте. `cases/labels/` заполняется по ответам
    конкретного прогона (строка label несёт `answer_prefix`), пока пусто.
 6. Голос и картинки не делаем сейчас.
+7. [x] Retrieval на multi-query: категория `multiquery`, сделана и прогнана 2026-09-18 (см.
+   [todo-2.md](todo-2.md) и «Результаты прогона multiquery» ниже).
 
 ### Результаты прогона 2026-09-18 (tier M, 2 прогона, 358 ходов, 0 ошибок)
 
 Отчёт: `evals/results/2026-09-17T22-21-25-575Z/report.html` (в .gitignore). Головные числа:
-TTFT p50 637 ms, ответ целиком p50 1.8 s / p95 8.7 s (хвост это thinking); retrieval recall@3 73%,
-MRR 0.79 (промахи на Q2-отчёте: retrieval-04, -05); single `must` 100%, judge faithfulness 97%,
+TTFT p50 637 ms, ответ целиком p50 1.8 s / p95 8.7 s (хвост это thinking); retrieval recall@1/3/5/7/10 =
+38/73/88/92/97%, hit@3 83%, MRR 0.82 (Q2-отчёт в retrieval-04/-05 приходит рангом 3–5, то есть мимо
+CHAT_TOPK = 3; пересчитано `--retrieval-only` 2026-09-18); single `must` 100%, judge faithfulness 97%,
 hallucination 10%, kappa с ручной разметкой: answered 1.0, correct 0.46, hallucination 0.77;
 abstain 90% (precision/recall отказов 90/90); tools routing precision 100%, recall 88%, args 64%,
 `must` 63%; memory@d 88/94/94% для d = 1/3/6, всё из контекста, ни одного повторного вызова тула;
@@ -413,6 +412,72 @@ multiturn followup 87%, consistency 100%; stress: контекст растёт 
 - **Judge мягче человека по `correct`** (kappa 0.46): ставит `yes` там, где ответ верен, но
   добавляет неподтверждённое (приписал цитату не тому человеку, «указано в SOW»). Ужесточить
   правило partial в `prompts/single.md`.
+
+### Результаты прогона multiquery (2026-09-18, tier M, 10 сессий, 91 ход, 0 ошибок)
+
+Отчёт: `evals/results/2026-09-18T11-42-54-580Z/report.html` (в .gitignore), judge локальный
+Qwen3.5-9B, 24 ручные метки в `cases/labels/multiquery.jsonl`. Головные числа:
+
+| Срез | n | recall@3 | precision@3 | hit@3 | MRR | evidence in context | context recall |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| все ходы с gold | 81 | 74% | 50% | 95% | 0.83 | 98% | 90% |
+| standalone | 45 | 78% | 55% | 98% | 0.87 | 98% | 88% |
+| follow-up (эллипсис, без переписывания) | 36 | 69% | 44% | 92% | 0.78 | 97% | 92% |
+
+- Ходы-отказы (gold пустой, 10): код `abstained` 80%; judge: refused 40% / partial 60%, hallucination
+  50% (после исправления derive; было 100%, см. ниже). Ручная разметка: 8 честных отказов, 2 выдумки
+  (-08 t5 «CAPA-441 одобрил Ops», -09 t10 дата ренью Pinnacle приписана Kelso).
+- Judge по ходам с gold (79): faithfulness 93%, hallucination 18%; по всем 91: faithfulness 89%,
+  hallucination 21%, `answered` yes 67 / partial 17 / refused 5, 2 вердикта не распарсились (обрезка
+  на `predict` 700, поднято до 900), 29.6 с на вердикт с накопленным контекстом (45 мин на 91 ход),
+  контекст judge ни разу не обрезался при ctx 16k.
+- Kappa с ручными метками (23 пары): hallucination 0.47 после того, как мета-утверждения «документы не
+  содержат X» перестали считаться not_in_context (до этого 0.15: каждый честный отказ шёл как
+  hallucination); `answered` 0.25, потому что judge ставит `partial` отказу с пояснением («нет
+  кредитов, есть только 4-часовой SLA»). Промпт ужесточён (такая фраза = refused, не claim) и
+  проверен пере-грейдом копии прогона `…-580Z-rejudge` через `--judge-backend claude-cli` (Haiku,
+  по явной команде): kappa `answered` 0.76, hallucination 0.50, все 10 ходов-отказов распознаны как
+  отказ (hallucination на них 30% против 20% по ручным меткам), faithfulness 89%, hallucination 25%,
+  parse 100%, 32 с на вердикт при 4 параллельных (11 мин на 91 ход), $3.62. Локальный 9B с новым
+  промптом не перегонялся (45 мин).
+- Из трейса: grounded 96% (числа против всего показанного в сессии), citation precision 45%, lang 99%
+  (один RU-вопрос отвечен по-английски), empty 0%, **leak 13% (12 ходов с `</think>`)**, 4 вызова
+  тулов на 91 ход, TTFT p50 394 ms / p95 1.15 s, ответ p50 1.45 s / p95 4.5 s, 103 tok/s; контекст
+  сессии растёт с 3.6k до 8.9k к 15-му ходу при 16k; rss дерева пик 2.5 GB, footprint 0.75 GB.
+- Стоимость judge через `claude-cli` (проверено на 3 ходах): ~$0.01–0.03 за вердикт, 8–70 с.
+
+- A/B retrieval-стратегий на этом же наборе (ADR-012: tool-режим, rewrite, cosine, bm25; без judge) —
+  в [todo-2.md](todo-2.md) «Итоги A/B» и `evals/results/compare-retrieval-ab/compare.html`. Дефолты не
+  изменены: RRF остаётся, rewrite — кандидат (+13 pp recall на follow-up за +1.1 с/ход).
+
+- **2026-09-20, todo-3**: эксперимент retrieval без LLM (26 вариантов, 133 запроса) — итоги в `docs/todo-3-exp.md` «Итоги», отчёт `evals/results/retrieval-exp-2026-09-20/compare.{md,html}`, batch-тест embed `evals/results/embed-batch-2026-09-20/report.md`. Дефолты сменены по ADR-013: префиксы EmbeddingGemma + вес BM25 1.5 → recall@3 83 → 89 %.
+- **2026-09-21, todo-3 часть 3**: раскладка контекста — выдержки только в последнем ходе, k=5, запрос из истории (ADR-014, `docs/todo-3-exp.md` «Эксперимент 3», `evals/results/compare-new-default-2026-09-21/`). Контекст перестал расти (медиана 4313 → 3189, max 17030 → 4726, ходов до потолка M 24 → 106), recall@k 74 → 95 %, leak 22 → 0 %, переполнений 0 против 7; цена — TTFT p50 293 мс → 2.3 с, потому что переписанную историю SDK не кладёт в KV. `MERIDIAN_CONTEXT_BUDGET=8000` возвращает кэш (TTFT 618 мс, cache ratio 83 %) ценой 17 % leak. Попутно: при KV-ключе `prompt_tokens` удваивает первый вызов сессии — метрики контекста считать по prefill.
+- **2026-09-21, todo-3 часть 2**: запрос для поиска из последних x реплик пользователя без LLM (`src/rag/query-history.mjs`, `QUERY_HISTORY_*`), 17 вариантов на 74 ходах multiquery с историей — итоги в `docs/todo-3-exp.md` «Эксперимент 2», отчёт `evals/results/retrieval-history-2026-09-21/compare.{md,html}`. Склейка без разбора: follow-up +14 pp, standalone −10 pp, итого ноль; с гейтом по эллиптичности (E2) +4 pp recall@3 при нулевой цене. Дефолт не менялся, e2e-вариант `history-e2` в `evals/config.json`.
+- **2026-09-21, память по тирам** (single + stress, 35 ходов, M4 Pro; `evals/results/2026-09-21T05-3*`): RSS дерева пик S 1.69 / M 2.19 / L 3.89 GiB, footprint (KV + буферы, без mmap-весов) 0.63 / 0.69 / 1.17, cold start 3.6 / 3.5 / 5.6 с, 130 / 99 / 45 tok/s. KV выделяется под весь ctx при загрузке, за сессию footprint растёт лишь на 0.07–0.10 GiB. **Найдено:** на S stress-сессии упираются в ctx 8k на 11–14-м ходе (5 ошибок `context overflow … max 8192`, промпт 8.3–8.8k) — нужен тримминг истории или ctx 12k (+0.05 GiB KV). На M (до 10.6k) и L (12.9k) ошибок нет.
+
+### Найдено при выполнении (2026-09-18, второй заход: todo-2)
+
+- **Idle-выгрузка и KV.** После `unloadModel` + `loadModel` в живом процессе modelId тот же (хэш
+  источника) и файл `.bin` тот же, но SDK префиллит всю историю поверх загруженного файла: ход 2
+  стоил 2385 prompt-токенов вместо 626, контекст 6.9k вместо 3.2k. Лечение на нашей стороне:
+  при idle-выгрузке chat удалять KV-файлы сессий (один чистый префилл, контекст 5.0k, стена 7.2 с
+  против 3.1 с). Это же объясняет раздутый контекст после рестарта serve из первой пробы.
+- **`</think>` утекает в ответ.** В 3 из 91 ходов multiquery ответ содержит `</think>` и второй
+  вариант ответа после него, хотя открывающий тег перехвачен `captureThinking`. Метрика `leak`
+  теперь ловит и закрывающий тег. Смотреть, как SDK режет thinking, когда модель открывает блок
+  повторно.
+- **Липкий отказ.** После честного отказа (нет ответа в корпусе) модель на следующем ходе отвечает
+  «документы не указывают…» и на вопрос, ответ на который ей показан (multiquery-06 t6–t7: спросили
+  ARR расширения Pinnacle, получили рассуждение про скидку из предыдущего хода; -09 t3 «документы не
+  содержат число AE», хотя hiring-plan показан). Кандидат в промпт: «каждый вопрос оценивай отдельно».
+- **Эллипсис без переписывания запроса.** Follow-up ходы ретривятся как набраны: recall@3 68%
+  против 78% у самостоятельных вопросов, но благодаря контексту сессии gold доступен модели в 97% ходов
+  (evidence_in_context). Провалы разрешения: -04 t2 «How did that compare with the target?» ушёл в
+  Helix vs Q3-таргет, -04 t9 «What was it in Q1?» ответил про churn вместо win rate.
+- **Q2-отчёт снова мимо**: -04 t1/t2 (Q2 revenue) ретривал принёс Q1-summary и forecast, тот же
+  промах, что в retrieval-04. Ответ при этом верный ($18.4M из «Notes for Q2 comparison» Q1-отчёта).
+- **Код-метрика `abstained` слепа к выдуманным отказам**: «документы не предусматривают сервисных
+  кредитов» проходит как отказ, judge ставит hallucination. Для no-answer ходов смотреть judge.
 
 ### Найдено при выполнении (2026-09-18)
 

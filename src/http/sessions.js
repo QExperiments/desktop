@@ -1,8 +1,14 @@
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 // Same alphabet the KV-cache key allows, so one id names both.
 const VALID = /^[\w.-]{1,64}$/
+
+// A session is named only by the client's `x-session-id` header. OpenAI's
+// `user` field is an end-user identifier for monitoring, not a conversation
+// key: a stock client that sets it and sends its full `messages` must stay in
+// stateless Chat Completions mode, so the server never reads it.
+export const isSessionId = (id) => typeof id === 'string' && VALID.test(id)
 
 // One JSON file per session under data/sessions. It stays on this disk next
 // to the corpus index; the chat page reads it back to show earlier chats, and
@@ -59,20 +65,38 @@ export const createSessions = (dir) => {
   }
 
   // The model's view of a session: every message its turns added, in order,
-  // plus the chunks already shown. A turn written before messages were stored
-  // is replayed as the plain question and answer.
+  // the chunks already shown with the message index of the turn that showed
+  // them, and the `base` of the last turn (src/chat/answer.js: where the
+  // excerpts the cached state holds begin). A turn written before messages
+  // were stored is replayed as the plain question and answer.
   const context = async (id) => {
     const turns = (await get(id))?.turns ?? []
-    return {
-      messages: turns.flatMap((turn) => turn.messages ?? [
+    const messages = []
+    const shown = []
+    let base = 0
+    for (const turn of turns) {
+      const at = messages.length
+      messages.push(...(turn.messages ?? [
         { role: 'user', content: turn.query ?? turn.question ?? '' },
         { role: 'assistant', content: turn.answer ?? '' },
-      ]),
-      shown: turns.flatMap((turn) => turn.shown ?? []),
+      ]))
+      if (turn.shown?.length) shown.push({ at, ids: turn.shown })
+      if (Number.isFinite(turn.base)) base = turn.base
     }
+    return { messages, shown, base }
   }
 
   const history = async (id) => (await context(id)).messages
 
-  return { get, append, list, context, history }
+  // Forgets a chat: the file goes and the id is free again. False when there
+  // was nothing to delete. The KV-cache file is the runtime's to drop.
+  const remove = (id) => {
+    if (!VALID.test(String(id))) return Promise.resolve(false)
+    return serial(id, () => rm(file(id)).then(() => true, (error) => {
+      if (error.code === 'ENOENT') return false
+      throw error
+    }))
+  }
+
+  return { get, append, list, context, history, remove }
 }

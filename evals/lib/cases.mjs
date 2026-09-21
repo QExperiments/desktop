@@ -4,11 +4,11 @@ import { join } from 'node:path'
 // Case files, one JSON object per line. Each category has its own shape (see
 // evals/README.md); this module loads them, checks the fields the runner and
 // the metrics rely on, and expands every case into case × run.
-export const CATEGORIES = ['retrieval', 'single', 'abstain', 'tools', 'memory', 'multiturn', 'stress']
+export const CATEGORIES = ['retrieval', 'single', 'abstain', 'tools', 'memory', 'multiturn', 'multiquery', 'stress']
 
 // Categories whose turns go through a live session on the server. `tools`
 // sends its own history without a session, `retrieval` never calls the model.
-export const LIVE = new Set(['single', 'abstain', 'memory', 'multiturn', 'stress'])
+export const LIVE = new Set(['single', 'abstain', 'memory', 'multiturn', 'multiquery', 'stress'])
 
 const required = {
   retrieval: ['query', 'gold_doc_ids'],
@@ -17,6 +17,7 @@ const required = {
   tools: ['messages', 'tool', 'must'],
   memory: ['turns', 'fact_turn', 'recall_turns'],
   multiturn: ['turns'],
+  multiquery: ['turns'],
   stress: ['queries'],
 }
 
@@ -36,6 +37,14 @@ const check = (category, item, line) => {
   if (category === 'multiturn') {
     for (const [i, j] of item.consistency ?? []) if (!item.turns?.[i - 1] || !item.turns?.[j - 1]) problems.push(`consistency pair ${i},${j} out of range`)
   }
+  if (category === 'multiquery') {
+    if (!Array.isArray(item.turns) || item.turns.length < 2) problems.push('turns must hold at least two turns')
+    for (const [i, turn] of (item.turns ?? []).entries()) {
+      if (typeof turn.query !== 'string' || !turn.query) problems.push(`turn ${i + 1} query`)
+      // Empty gold means the corpus has no answer and the right move is to say so.
+      if (!Array.isArray(turn.gold_doc_ids)) problems.push(`turn ${i + 1} gold_doc_ids must be an array`)
+    }
+  }
   if (problems.length) throw new Error(`${category}.jsonl line ${line} (${item.id ?? '?'}): ${problems.join(', ')}`)
 }
 
@@ -43,7 +52,7 @@ const check = (category, item, line) => {
 // the expectations of that turn attached. Single-turn categories become one turn.
 export const turnsOf = (category, item) => {
   if (category === 'stress') return item.queries.map((query, i) => ({ turn: i + 1, query }))
-  if (category === 'memory' || category === 'multiturn') return item.turns.map((turn, i) => ({ turn: i + 1, ...turn }))
+  if (category === 'memory' || category === 'multiturn' || category === 'multiquery') return item.turns.map((turn, i) => ({ turn: i + 1, ...turn }))
   if (category === 'tools') return [{ turn: 1, query: item.messages.at(-1).content, history: item.messages.slice(0, -1), tool: item.tool, args: item.args ?? null, must: item.must }]
   return [{ turn: 1, ...item }]
 }

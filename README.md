@@ -86,8 +86,7 @@ If the peer is down at start, everything loads locally.
 
 `POST /v1/audio/transcriptions`, `/v1/audio/speech` and `/v1/audio/ask`
 all go through that same `acquire()`, so they pick up the peer without
-a separate P2P path. `/v1/chat/completions` is still 501 until
-retrieval; when that route lands it will use the same chat model.
+a separate P2P path, and `/v1/chat/completions` uses the same chat model.
 
 `QVAC_FORCE_LOCAL=1` skips the peer even when a key is set.
 `QVAC_ASSUME_STRONG_PEER=1` asks the peer for L-tier weights instead of
@@ -123,6 +122,27 @@ the test console that exercises each API on its own.
 `GET /v1/models` answers 503 while weights load and 200 once the runtime
 can serve, which is the readiness signal the eval harness polls.
 
+## API
+
+OpenAI-compatible where a stock client expects it, plus what the chat page
+and the eval harness need. Everything is local; nothing here downloads.
+
+| Route | Does |
+| --- | --- |
+| `GET /v1/models` | 503 while loading, then the two model ids from `qvac-eval.json` |
+| `POST /v1/chat/completions` | retrieval, tools, grounded answer, `citations`, `usage` and `stats`; `stream: true` for SSE; honours `temperature` and `seed` |
+| `x-session-id: <id>` header | names a session: the server keeps the turns and the KV cache under it and reads only the last user message from the request; without the header the request is stateless Chat Completions and the client's history is sent as given. OpenAI's `user` field is not a session key |
+| `GET /v1/sessions`, `GET /v1/sessions/:id` | earlier chats, for the chat page |
+| `DELETE /v1/sessions/:id` | forgets a chat: its turns and its KV-cache file |
+| `POST /v1/cancel/:requestId` | cancels a load or inference in flight |
+| `GET /v1/models/catalog` | every role and tier of `models.json` with what is provisioned, what the registry knows and which tiers this machine affords (see Models) |
+| `POST /v1/audio/transcriptions`, `/v1/audio/speech`, `/v1/audio/ask`, `/v1/images/ask` | voice and vision (below) |
+| `GET /health` | tier, mode, loaded models, resident roles unloaded while idle, in-flight requests |
+| `GET /`, `GET /ui` | chat page and test console; `MERIDIAN_UI=0` serves the API alone |
+
+Ids in `x-session-id` are 1 to 64 characters of letters, digits, `_`, `.` or
+`-`, the alphabet the KV-cache key allows; anything else is a 400.
+
 ## Models
 
 `models.json` maps each role — chat, embeddings, ASR, TTS, vision — to a
@@ -144,6 +164,25 @@ npm run models:fetch -- --all               # include the on-demand roles
 Ctrl+C cancels the download in flight and keeps the partial file; the next
 run resumes it. `--discard` throws the partial away instead.
 
+```bash
+npm run models:list                 # every role and tier: provisioned? fits this machine?
+npm run models:list -- --refresh    # ask the QVAC registry first (network) and keep data/models/registry.json
+npm run models:list -- --json       # the same object GET /v1/models/catalog returns
+```
+
+`models:list` never downloads. With a registry snapshot on disk it also says
+whether each `models.json` entry is in the registry with the same size
+(matched by sha256); `serve` only reads that file.
+
+Chat and embeddings stay loaded while the assistant is in use and give their
+memory back after an hour without a request (`MERIDIAN_RESIDENT_IDLE_MS`, 0
+keeps them until stop); `GET /health` lists them under `unloaded`. The next
+request loads them again, about 2 s on the dev Mac and about 5 s on the fleet
+laptop, and the sessions' KV-cache files are dropped with the model so the
+reloaded one starts from one clean prefill of the stored turns (measured on
+tier M: 7.2 s for that turn against 3.1 s warm; without dropping the files the
+SDK prefilled the history on top of the loaded file and the context doubled).
+
 The tier is measured from total RAM minus a 3.5 GiB OS reserve, so an 8 GB
 laptop serves tier M and a 6 GB one tier S; below 5 GB `serve` stops with the
 RAM it would need. The chat context is 8k tokens on S, 16k on M and 32k on L;
@@ -151,6 +190,25 @@ a session's whole conversation lives in that window (see req 6.3 below).
 `MERIDIAN_TIER=S` forces one for testing. `serve`
 uses the largest tier whose weights are all present, so a machine handed a
 bundle built elsewhere still starts.
+
+Retrieval has three switches, read once at start and compared by the eval
+(ADR-012). The defaults are what ships; the other values exist so that
+`npm run eval -- --variant <name>` can start `serve` with them.
+
+| Variable | Default | Other values |
+| --- | --- | --- |
+| `MERIDIAN_RETRIEVAL_MODE` | `auto`: `search(query, 5)` before every turn | `tool`: search before the first turn of a session only; later the model calls `search_documents(query)` when the conversation's excerpts do not hold the answer |
+| `MERIDIAN_QUERY_REWRITE` | `0` | `1`: a turn with history first asks the chat model (reasoning off, 48 tokens) for a standalone search query; the original question still goes to the model; `usage` includes the rewrite, `stats.rewrite_ms` and `stats.rewrite_tokens` show it alone |
+| `MERIDIAN_FUSION` | `rrf`: cosine and BM25 rankings fused | `cosine`: vector ranking alone; `bm25`: full-text ranking alone. `citations[].score` is the RRF score, the cosine similarity or the BM25 score |
+| `MERIDIAN_CONTEXT_LAYOUT` | `current`: only the last user turn carries excerpts, earlier turns are replayed as the bare question, so the context holds five chunks whatever the turn number (ADR-014) | `all`: excerpts stay where they were shown (ADR-011); the context grows with every retrieval and the KV cache is reused end to end |
+| `MERIDIAN_CHAT_TOPK` | `5` chunks in front of the model per turn | any positive number |
+| `MERIDIAN_CONTEXT_BUDGET` | `0`: layout `current` rewrites the history every turn, so the turn is prefilled whole | tokens, e.g. `8000`: keep the earlier excerpts in the cached prefix and the KV cache with them until the context would cross the budget, then compact once |
+| `MERIDIAN_CHAT_ENGINE` | `sdk`: `completion()` through the SDK, which commits the whole turn — excerpts included — into the session's KV file | `direct`: the llama.cpp addon underneath, where the cached state holds the bare conversation and the excerpts live in a key thrown away with the turn (docs/todo-5.md). No cancel registry, no P2P delegation |
+| `MERIDIAN_DIRECT_PREDICT` | `4096` generated tokens per round on the direct engine, reasoning included | any positive number |
+| `MERIDIAN_CHAT_PREDICT` | `4096` generated tokens per round on the SDK path, reasoning included | any positive number; below ~1024 the thinking of a hard question eats the answer |
+| `MERIDIAN_CHAT_DISCARD` | `0`: a turn that crosses the context throws `context overflow` and the session's KV state goes with it | tokens the addon's sliding window drops off the front instead (`modelConfig.n_discarded`); the system prompt is protected, the oldest turns are not, and nothing tells the application what was lost (docs/todo-6.md) |
+| `MERIDIAN_CHAT_CTX` | the tier's own `ctx_size` from `models.json` (16384 on M) | overrides it for the chat role; it must still hold the largest single prompt, or a replay after a lost cache overflows |
+| `QUERY_HISTORY_TURNS` | `3` user questions in the search text of a follow-up (`QUERY_HISTORY_WHEN=elliptical`, so a question that names its own subject searches for itself) | `1` turns it off; `QUERY_HISTORY_CHARS`, `_MODE`, `_ORDER`, `_WHEN` are the rest of the knobs (`src/rag/query-history.mjs`) |
 
 ## What is written to disk
 
@@ -161,8 +219,9 @@ bundle built elsewhere still starts.
 | `data/models/manifest.json` | role, tier, source, path, size, sha256 |
 | `data/models/https/` | weights fetched over HTTPS rather than the registry |
 | `data/lancedb/` | the corpus, chunked and embedded |
-| `data/sessions/<id>.json` | every turn made under a session id: query, answer, citations, kind, the messages the model saw, and a small preview of a photo; delete the file to forget the chat |
-| `~/.qvac/kv-cache/meridian-<id>/` | the SDK's KV state for a session, one file; kept for the newest five sessions, deleted when older ones start (`MERIDIAN_CACHED_SESSIONS`) |
+| `data/models/registry.json` | what the QVAC registry listed the last time `models:list --refresh` ran; name, size, checksum and quantization per model, no download keys |
+| `data/sessions/<id>.json` | every turn made under a session id: query, answer, citations, kind, the messages the model saw, and a small preview of a photo; `DELETE /v1/sessions/<id>` or deleting the file forgets the chat |
+| `~/.qvac/kv-cache/meridian-<id>/` | the SDK's KV state for a session, one file; kept for the newest five sessions, deleted when older ones start (`MERIDIAN_CACHED_SESSIONS`), when the session is deleted, and when the chat model unloads after an idle hour |
 | `data/traces/<run>/<requestId>.json` | only for requests with an `x-eval-run` header: hits, messages, tool rounds, stats for the eval harness |
 | `data/serve.pid` | the running server's PID |
 
@@ -173,9 +232,13 @@ is where its prompt echo would otherwise appear). `serve` opens no outbound conn
 ## Build
 
 ```bash
-npm run build        # plugin-scoped worker bundle in qvac/, app bundle in dist/
-npm run build:full   # also the full-SDK bundle, and writes docs/bundle-size.md
+npm run build              # plugin-scoped worker bundle in qvac/, app bundle in dist/
+npm run build:full         # also the full-SDK bundle, and writes docs/bundle-size.md
+npm run build -- --no-ui   # app bundle without the chat page and test console (ejs, @fastify/view)
 ```
+
+The UI is a dynamic import behind `MERIDIAN_UI`, so a `--no-ui` bundle serves
+the API alone and logs once that the UI is not in this build.
 
 ## Tests
 
@@ -192,6 +255,9 @@ P2P live checks (two processes, real DHT) are not in CI. Walk through
 ```bash
 npm run eval                                   # all categories on the tier in evals/config.json
 npm run eval -- --tier M --only tools --runs 1 --no-judge
+npm run eval -- --only multiquery              # ten multi-question sessions, retrieval and judge per turn
+npm run eval -- --only multiquery --no-judge --variant rewrite   # the same set against a serve with MERIDIAN_QUERY_REWRITE=1
+npm run eval:compare -- evals/results/<baseline> evals/results/<variant>...   # tokens, recall@3, tool calls, latency side by side
 ```
 
 `evals/run.mjs` starts a fresh `serve` on port 11435, replays the scripted

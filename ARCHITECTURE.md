@@ -84,8 +84,9 @@ sequenceDiagram
   participant Q as runtime and SDK
   C->>H: POST /v1/chat/completions
   H->>A: answer(history, params, requestId, sessionKey)
-  A->>R: retrieve(question)
-  R->>Q: embed(question)
+  A->>Q: completion(rewrite prompt) — only with MERIDIAN_QUERY_REWRITE=1 and history
+  A->>R: retrieve(query) — every turn, or the first turn only in tool mode
+  R->>Q: embed(query)
   R-->>A: chunks and citations
   A->>Q: completion(history plus context, tools, kvCache, generationParams)
   Q-->>A: contentDelta events
@@ -95,7 +96,7 @@ sequenceDiagram
   Note over C,H: client disconnect triggers cancel(requestId)
 ```
 
-Rules: retrieval first, always; empty retrieval → model is told to say the corpus has no answer and `citations` is `[]`; max 4 tool rounds; the same generator feeds SSE, JSON, the voice loop and tests.
+Rules: retrieval first (before every turn in `MERIDIAN_RETRIEVAL_MODE=auto`; before the first turn of a session in `tool` mode, where later turns retrieve through the `search_documents` tool); with `MERIDIAN_QUERY_REWRITE=1` a turn with history first asks the chat model for a standalone search query; `MERIDIAN_FUSION` picks RRF, cosine or BM25 (ADR-012); empty retrieval → the model is told the corpus has no answer and `citations` is `[]`; max 3 tool rounds; the same generator feeds SSE, JSON, the voice loop and tests.
 
 ## 6. Model lifecycle
 
@@ -115,9 +116,9 @@ Readiness (`GET /v1/models` → 200) only after embeddings + LLM are loaded and 
 
 ## 7. Data flow
 
-`corpus.zip` → `data/corpus/` (byte-identical; relative path = citation `file`) → per-type parse (md/txt/csv/eml; audio via `transcribe()`; images inventoried for the VLM; unknown types listed in the ingest report) → `ragChunk({ chunkStrategy: "paragraph", chunkSize: 350, chunkOverlap: 60 })` → `embed()` in batches → SQLite tables `documents`, `chunks`, `chunks_fts`, `chunks_vec`, `meta(embedding_model, dim)`. Idempotent by `sha256`, resumable per document.
+`corpus.zip` → `data/corpus/` (byte-identical; relative path = citation `file`) → per-type parse (md/txt/csv/eml; audio via `transcribe()`; images inventoried for the VLM; unknown types listed in the ingest report) → `ragChunk({ chunkStrategy: "paragraph", splitStrategy: "token", chunkSize: 512, chunkOverlap: 64 })` → `embed()` in batches → one LanceDB table `meridian_corpus` (`id`, `vector`, `text`, `file`, `chunk_index`, `content_hash`, …) with a full-text index on `text`. Idempotent by `sha256`, resumable per document.
 
-Retrieval: vector top-20 ∪ BM25 top-20 → reciprocal-rank fusion → top-8 → dedupe per file.
+Retrieval (as shipped): vector top-5 ∪ BM25 top-5 → reciprocal-rank fusion (k = 60) → top-5 chunks into the user turn. Only the last user turn carries excerpts: earlier ones are replayed as the bare question, so the context does not grow with retrieval (ADR-014; `MERIDIAN_CONTEXT_LAYOUT=all` keeps them and the KV cache, `MERIDIAN_CONTEXT_BUDGET` keeps both until a budget is crossed). A follow-up that cannot be searched on its own is searched for together with the last three questions (`QUERY_HISTORY_*`). `MERIDIAN_FUSION=cosine|bm25` keeps one leg, `MERIDIAN_RETRIEVAL_MODE=tool` moves retrieval after the first turn into the `search_documents` tool, `MERIDIAN_QUERY_REWRITE=1` searches for a rewritten query (ADR-012; the eval compares them).
 
 ## 8. Eval contract
 
@@ -151,7 +152,7 @@ Retrieval: vector top-20 ∪ BM25 top-20 → reciprocal-rank fusion → top-8 �
 - **R3** Intel iGPU without usable Vulkan → CPU inference; tier S/M sizes, small `ctx_size`, streaming.
 - **R4** `sqlite-vec` binary per OS/arch → `VectorStore` interface, LanceDB fallback.
 - **Assumptions:** corpus is tens of MB; one user per machine; Windows/macOS laptops, Linux provider.
-- **Ask Tether:** is 0.18.x delegation expected, or is there a 0.19+ replacement? **Ask Raj:** log retention, `data/` location, MDM package format. **Ask Dana:** corpus update cadence, field languages.
+- **Ask Tether:** is 0.18.x delegation expected, or is there a 0.19+ replacement? **Ask Raj:** log retention, `data/` location, MDM package format; whether the eval harness may grade answers with a hosted model (`evals/` has an opt-in `--judge-backend claude-cli` that sends the fictional eval corpus excerpts to Anthropic; the product never does). **Ask Dana:** corpus update cadence, field languages; whether a first answer that takes about 5 s extra after an hour of no use is acceptable (the chat model unloads after that hour to free 1.5 GB on the fleet laptop; `MERIDIAN_RESIDENT_IDLE_MS`).
 
 ## 11. Stages
 

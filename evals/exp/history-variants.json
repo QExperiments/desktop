@@ -1,0 +1,137 @@
+{
+  "_doc": "Query-from-history experiment (docs/todo-3-exp.md, part 2): the search text is the current question joined with the previous user questions of the session. Cases: evals/exp/cases-history (one per multiquery turn with gold, `history` = earlier questions). B0 = production defaults (ADR-013), question alone. QUERY_HISTORY_TURNS counts the current question.",
+  "B0": {
+    "axis": "base",
+    "change": "question alone (shipped): EMBED_PREFIX=gemma, BM25 weight 1.5",
+    "env": {}
+  },
+  "H2": {
+    "axis": "history",
+    "change": "last 2 user questions, both legs",
+    "env": {
+      "QUERY_HISTORY_TURNS": "2"
+    }
+  },
+  "H3": {
+    "axis": "history",
+    "change": "last 3 user questions, both legs",
+    "env": {
+      "QUERY_HISTORY_TURNS": "3"
+    }
+  },
+  "H5": {
+    "axis": "history",
+    "change": "last 5 user questions, both legs",
+    "env": {
+      "QUERY_HISTORY_TURNS": "5"
+    }
+  },
+  "H9": {
+    "axis": "history",
+    "change": "all user questions that fit 600 chars, both legs",
+    "env": {
+      "QUERY_HISTORY_TURNS": "99"
+    }
+  },
+  "H9L": {
+    "axis": "history",
+    "change": "all user questions that fit 1500 chars, both legs",
+    "env": {
+      "QUERY_HISTORY_TURNS": "99",
+      "QUERY_HISTORY_CHARS": "1500"
+    }
+  },
+  "N3": {
+    "axis": "history",
+    "change": "last 3, current question first",
+    "env": {
+      "QUERY_HISTORY_TURNS": "3",
+      "QUERY_HISTORY_ORDER": "newest"
+    }
+  },
+  "V3": {
+    "axis": "history-mode",
+    "change": "last 3 in the vector leg only; BM25 sees the question alone",
+    "env": {
+      "QUERY_HISTORY_TURNS": "3",
+      "QUERY_HISTORY_MODE": "vector"
+    }
+  },
+  "T3": {
+    "axis": "history-mode",
+    "change": "last 3 in the BM25 leg only; the vector leg sees the question alone",
+    "env": {
+      "QUERY_HISTORY_TURNS": "3",
+      "QUERY_HISTORY_MODE": "fts"
+    }
+  },
+  "U3": {
+    "axis": "history-mode",
+    "change": "last 3: question alone and joined, four lists fused",
+    "env": {
+      "QUERY_HISTORY_TURNS": "3",
+      "QUERY_HISTORY_MODE": "fuse"
+    }
+  },
+  "U9": {
+    "axis": "history-mode",
+    "change": "all that fit 600 chars: question alone and joined, fused",
+    "env": {
+      "QUERY_HISTORY_TURNS": "99",
+      "QUERY_HISTORY_MODE": "fuse"
+    }
+  },
+  "E2": {
+    "axis": "history-gate",
+    "change": "last 2, only when the question looks elliptical (rules)",
+    "env": {
+      "QUERY_HISTORY_TURNS": "2",
+      "QUERY_HISTORY_WHEN": "elliptical"
+    }
+  },
+  "E3": {
+    "axis": "history-gate",
+    "change": "last 3, only when elliptical (rules)",
+    "env": {
+      "QUERY_HISTORY_TURNS": "3",
+      "QUERY_HISTORY_WHEN": "elliptical"
+    }
+  },
+  "EU3": {
+    "axis": "history-gate",
+    "change": "last 3 fused with the question alone, only when elliptical (rules)",
+    "env": {
+      "QUERY_HISTORY_TURNS": "3",
+      "QUERY_HISTORY_MODE": "fuse",
+      "QUERY_HISTORY_WHEN": "elliptical"
+    }
+  },
+  "O2": {
+    "axis": "history-gate",
+    "change": "last 2, only on labelled follow-ups (oracle, ceiling of the gate)",
+    "env": {
+      "QUERY_HISTORY_TURNS": "2",
+      "QUERY_HISTORY_WHEN": "oracle"
+    },
+    "eval_only": true
+  },
+  "O3": {
+    "axis": "history-gate",
+    "change": "last 3, only on labelled follow-ups (oracle)",
+    "env": {
+      "QUERY_HISTORY_TURNS": "3",
+      "QUERY_HISTORY_WHEN": "oracle"
+    },
+    "eval_only": true
+  },
+  "OU3": {
+    "axis": "history-gate",
+    "change": "last 3 fused, only on labelled follow-ups (oracle)",
+    "env": {
+      "QUERY_HISTORY_TURNS": "3",
+      "QUERY_HISTORY_MODE": "fuse",
+      "QUERY_HISTORY_WHEN": "oracle"
+    },
+    "eval_only": true
+  }
+}
