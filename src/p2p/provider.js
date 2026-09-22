@@ -2,7 +2,7 @@ import { close, startQVACProvider, stopQVACProvider } from '@qvac/sdk'
 import { logger } from '../logger.js'
 import { parseFirewall, parsePublicKeys } from './firewall.js'
 
-// I.1.1 allow/deny by consumer public key. Live checklist: docs/p2p-test.md
+// I.1.1 allow/deny by consumer public key. Live checklist: docs-final/p2p-test.md
 
 const seed = process.argv[2] || process.env.QVAC_HYPERSWARM_SEED
 

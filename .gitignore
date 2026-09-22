@@ -13,10 +13,8 @@ AGENTS.override.md
 .env.*
 context/
 data/
-docs/*.html
+docs/
 qvac/
 evals/results/
 data/profiles/
-docs/todo*.md
-docs/eval-sim-plan.md
-docs/trace-view.mjs
+ai-ml-accelerator/

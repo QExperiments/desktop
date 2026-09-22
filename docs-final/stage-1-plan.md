@@ -30,7 +30,7 @@ src/
   runtime/cancel.mjs     Map requestId → { kind, role, startedAt }; cancel one / cancel all
   http/server.mjs  http/models.mjs  http/cancel.mjs
 test/unit/*.test.mjs  test/e2e/runtime.e2e.mjs
-docs/decisions.md  README.md (Models section)  ARCHITECTURE.md (small edits, see §4)
+docs-final/decisions.md  README.md (Models section)  ARCHITECTURE.md (small edits, see §4)
 data/  (git-ignored) models/ manifest.json logs/ .serve.pid
 ```
 

@@ -3,7 +3,7 @@ import { pathToFileURL } from 'node:url'
 
 // PKCS#8 wrapper around a 32-byte Ed25519 seed. Same construction Hyperswarm
 // uses for QVAC_HYPERSWARM_SEED, so the hex we print is the firewall key.
-// Live checklist: docs/p2p-test.md
+// Live checklist: docs-final/p2p-test.md
 const ED25519_PKCS8_PREFIX = Buffer.from('302e020100300506032b657004220420', 'hex')
 
 export const normalizeSeed = (hex) => {
