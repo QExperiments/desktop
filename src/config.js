@@ -67,14 +67,18 @@ export const config = {
     layout: oneOf(process.env.MERIDIAN_CONTEXT_LAYOUT ?? 'current', ['all', 'current'], 'MERIDIAN_CONTEXT_LAYOUT'),
     // How many retrieved chunks a turn puts in front of the model.
     topK: Math.max(1, Number(process.env.MERIDIAN_CHAT_TOPK ?? 5) || 5),
-    // Context budget in tokens for layout current, 0 (default) for none.
+    // Context budget in tokens for layout current, 0 for none. The default
+    // is 0.8 of the 32768 every tier runs with: the measured configuration of
+    // the 2026-09-21 run, where it held the cache across a conversation
+    // (ratio 0.72-0.88 on the multi-turn categories) and compacted four times
+    // in 410 turns. At 0 the server answers every turn with a full prefill.
     // Rewriting an earlier message invalidates the KV cache: the SDK sends
     // only the unsaved tail and the addon appends whatever it is given, so
     // the old excerpts cannot be taken back out of the cached state. With a
     // budget the excerpts of earlier turns stay in the cached prefix, and the
     // turn that would cross the budget drops the cache and replays the
     // conversation clean — one prefill instead of one per turn.
-    budget: Math.max(0, Number(process.env.MERIDIAN_CONTEXT_BUDGET ?? 0) || 0),
+    budget: Math.max(0, Number(process.env.MERIDIAN_CONTEXT_BUDGET ?? 26214) || 0),
     // sdk: completion() through the SDK, which commits the whole turn --
     // excerpts included -- into the session's KV file. direct: the llama.cpp
     // addon underneath, where `saveCacheToDisk` is decided per call, so the
@@ -92,12 +96,14 @@ export const config = {
     // How many messages of the reduced conversation a compaction leaves, 0
     // for no limit. It applies on top of the budget and only at a compaction,
     // so the replay is append-only in between and the KV cache survives.
-    keepMessages: Math.max(0, Number(process.env.MERIDIAN_CONTEXT_KEEP_MESSAGES ?? 0) || 0),
-    // 1: a compaction also drops the tool rounds of the turns before it --
-    // the call and its result. In tool mode the retrieved documents arrive in
-    // the result, so without this a compaction rewrites nothing and the
-    // context does not shrink (docs/todo-8.md).
-    dropToolRounds: process.env.MERIDIAN_DROP_TOOL_ROUNDS === '1',
+    // Without it a compaction rewrites the excerpts away and still replays
+    // the whole conversation, which is the expensive half of the two.
+    keepMessages: Math.max(0, Number(process.env.MERIDIAN_CONTEXT_KEEP_MESSAGES ?? 10) || 0),
+    // A compaction also drops the tool rounds of the turns before it -- the
+    // call and its result. In tool mode the retrieved documents arrive in the
+    // result, so with MERIDIAN_DROP_TOOL_ROUNDS=0 a compaction rewrites
+    // nothing and the context does not shrink.
+    dropToolRounds: process.env.MERIDIAN_DROP_TOOL_ROUNDS !== '0',
     // 1: the agent-loop system prompt -- an explicit order for choosing a
     // tool, and the rule never to call a fact missing before searching for it.
     agentPrompt: process.env.MERIDIAN_AGENT_PROMPT === '1',
