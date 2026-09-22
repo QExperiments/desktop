@@ -132,14 +132,18 @@ export const config = {
   // src/chat/tool-markup.js instead of the SDK's own parser (docs/todo-6.md).
   toolsInSystem: process.env.MERIDIAN_TOOLS_IN_SYSTEM === '1',
   chatCtx: Math.max(0, Number(process.env.MERIDIAN_CHAT_CTX ?? 0) || 0),
-  // Generation budget of a chat round. Reasoning is generated first and counts
-  // against it, so the budget has to cover the thinking as well as the answer:
-  // at 4096 two of the 83 turns of the multiquery run are cut, at 1024 eleven.
+  // Generation budget of a chat round, reasoning included. With
+  // chatReasoningBudget in place no honest turn has come near it: across the
+  // 516 turns of the 2026-09-21 and 2026-09-22 runs the longest was 897
+  // tokens and p99 was 701. Everything above 1024 was the sampler repeating a
+  // paragraph until the budget ran out, and at 4096 three such turns in a row
+  // added 12000 tokens to a session and the next one died on `context
+  // overflow at batch prefill step (34377 tokens, max 32768)`.
   // Until 2026-09-21 the SDK path asked for 320 and never got it -- the
   // caller's own (empty) generationParams was spread over the defaults in
   // src/chat/answer.js -- so the addon's own budget ran instead and one turn
   // generated 11853 tokens.
-  chatPredict: Math.max(64, Number(process.env.MERIDIAN_CHAT_PREDICT ?? 4096) || 4096),
+  chatPredict: Math.max(64, Number(process.env.MERIDIAN_CHAT_PREDICT ?? 1024) || 1024),
   directPredict: Math.max(64, Number(process.env.MERIDIAN_DIRECT_PREDICT ?? 4096) || 4096),
   // Cap on the reasoning channel of a chat round (addon `reasoning_budget`):
   // -1 leaves it open, 0 switches it off, a positive number is a token cap the
