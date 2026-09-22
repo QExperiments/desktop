@@ -58,10 +58,10 @@ const declaredTools = (mode = MODE) => (mode === 'tool' ? [...baseTools, SEARCH_
 // explicit order rather than a paragraph, and the two failures the runs kept
 // showing get a rule each -- calling a fact missing without having searched
 // for it, and carrying one refusal into the next question.
-// The agent loop leaves the reasoning channel open: Qwen3.5 ignores /no_think
-// here anyway (measured 400-2800 characters of reasoning on the first turn of
-// every session), and the addon drops the block from the KV at end of
-// generation, so it costs generated tokens but never context
+// Neither prompt asks for /no_think any more. Qwen3.5 only damps on it (854
+// characters of reasoning on the first turn of the 2026-09-21 run, with it in
+// the prompt), `reasoning_budget` is the real cap, and the two together told
+// the model not to open a block the sampler is obliged to close.
 // (`remove_thinking_from_context` defaults to true for the Qwen3 family).
 const AGENT_LINES = [
   'You are Meridian Components\' internal assistant.',
@@ -108,9 +108,6 @@ export const systemPrompt = (mode = MODE, { toolsInSystem = config.toolsInSystem
     ? ['This conversation may start part way through: earlier turns and their excerpts are not shown to you. If the fact asked for is not in what you can see here, call search_documents for it instead of recalling it.']
     : []),
   'If you do not have the answer, say so plainly instead of guessing a number.',
-  // Qwen3 and Qwen3.5 read this as "skip the reasoning block". Models that do
-  // not recognise it ignore it, and captureThinking catches them instead.
-  '/no_think',
 ].join(' ')].join('\n'))
 export const SYSTEM = systemPrompt()
 
@@ -123,7 +120,6 @@ export const REWRITE_SYSTEM = [
   'Replace pronouns and references such as "it", "they", "that customer", "and the extended one" with the product, customer, policy or metric they stand for in the conversation.',
   'Keep the language and the meaning of the question; add nothing that is not asked.',
   'Reply with the query alone: no quotes, no explanation.',
-  '/no_think',
 ].join(' ')
 const REWRITE_TURNS = 3
 const REWRITE_ANSWER_CHARS = 300
@@ -292,9 +288,9 @@ export const visibleChunks = (shown = [], base = 0) =>
 // invalidates the reasoning compactor's tracked span and fails the request.
 // `reasoning_budget` caps the reasoning channel: the sampler force-emits
 // </think> once it is spent (index.d.ts:268). It is the reliable switch --
-// /no_think only damps Qwen3.5 (1025 characters against 2215 without it),
-// and one turn of the 2026-09-21 mini-run spent 18386 characters on "Thanks,
-// that is all I needed", hit `predict` and answered with nothing in 43 s.
+// /no_think only damps Qwen3.5 and is no longer in either prompt. One turn of
+// the 2026-09-21 mini-run spent 18386 characters on "Thanks, that is all I
+// needed", hit `predict` and answered with nothing in 43 s.
 export const roundParams = (asked = {}, { predict = config.chatPredict, discard = config.chatDiscard, reasoning = config.chatReasoningBudget, repeat = config.chatRepeatPenalty } = {}) =>
   ({ temp: 0.2, predict, ...(repeat > 0 ? { repeat_penalty: repeat } : {}), ...(reasoning >= 0 ? { reasoning_budget: reasoning } : {}), ...(discard > 0 ? { remove_thinking_from_context: false } : {}), ...asked })
 
