@@ -82,6 +82,31 @@ export const config = {
     // and die with a throwaway key (docs/todo-5.md). direct has no cancel
     // registry and no P2P delegation, so it is opt-in.
     engine: oneOf(process.env.MERIDIAN_CHAT_ENGINE ?? 'sdk', ['sdk', 'direct'], 'MERIDIAN_CHAT_ENGINE'),
+    // Turn window, 0 (default) off. With a budget, the turn that would cross
+    // it keeps only the last N exchanges and drops everything before them,
+    // instead of keeping the whole conversation and stripping its excerpts.
+    // The conversation the model then sees is [system, q1 a1 ... qN aN,
+    // this question with its excerpts]; the cached prefix is rebuilt once at
+    // each trim and reused in between (docs/todo-7.md).
+    keepTurns: Math.max(0, Number(process.env.MERIDIAN_CONTEXT_KEEP_TURNS ?? 0) || 0),
+    // How many messages of the reduced conversation a compaction leaves, 0
+    // for no limit. It applies on top of the budget and only at a compaction,
+    // so the replay is append-only in between and the KV cache survives.
+    keepMessages: Math.max(0, Number(process.env.MERIDIAN_CONTEXT_KEEP_MESSAGES ?? 0) || 0),
+    // 1: a compaction also drops the tool rounds of the turns before it --
+    // the call and its result. In tool mode the retrieved documents arrive in
+    // the result, so without this a compaction rewrites nothing and the
+    // context does not shrink (docs/todo-8.md).
+    dropToolRounds: process.env.MERIDIAN_DROP_TOOL_ROUNDS === '1',
+    // 1: the agent-loop system prompt -- an explicit order for choosing a
+    // tool, and the rule never to call a fact missing before searching for it.
+    agentPrompt: process.env.MERIDIAN_AGENT_PROMPT === '1',
+    // Retrieval mode `tool` used to search by itself on the first turn of a
+    // session, which made that turn unlike every other one: the model was
+    // handed its excerpts and had nothing to route. 0 (the default) leaves
+    // the first turn to the model like any other, so a single-turn case
+    // measures the agent loop rather than the server's own search.
+    toolFirstTurn: process.env.MERIDIAN_TOOL_FIRST_TURN === '1',
   },
   // Sliding-window context for the chat role (llama.cpp `n_discard`, exposed
   // by the addon and the SDK as modelConfig.n_discarded). 0, the default, is
@@ -110,6 +135,20 @@ export const config = {
   // generated 11853 tokens.
   chatPredict: Math.max(64, Number(process.env.MERIDIAN_CHAT_PREDICT ?? 4096) || 4096),
   directPredict: Math.max(64, Number(process.env.MERIDIAN_DIRECT_PREDICT ?? 4096) || 4096),
+  // Cap on the reasoning channel of a chat round (addon `reasoning_budget`):
+  // -1 leaves it open, 0 switches it off, a positive number is a token cap the
+  // sampler enforces by emitting </think> itself. 512 is enough for the tool
+  // choice and short of the runaway that cost one turn 43 s and an empty answer.
+  chatReasoningBudget: Number(process.env.MERIDIAN_CHAT_REASONING_BUDGET ?? 512),
+  // I.6 -- SDK profiler. '' (the default) leaves it off: `enable` installs
+  // hooks on every SDK operation and `verbose` also keeps a ring buffer of
+  // 1000 events, neither of which a 2019 laptop should pay for by default.
+  // 'summary' aggregates only; 'verbose' adds the ring buffer.
+  // Resource gauges are off in the SDK's own defaults and we ask for them:
+  // memory and GPU at the moment of generation is half of what the block is
+  // for, and our sampler reads RSS, which undercounts Metal.
+  profile: oneOf(process.env.MERIDIAN_PROFILE ?? '', ['', 'summary', 'verbose'], 'MERIDIAN_PROFILE'),
+  profileDir: abs('data/profiles'),
   // Where the direct engine keeps its per-session checkpoints. Separate from
   // the SDK's own kv-cache directory: different bookkeeping, different owner.
   directCacheDir: abs('data/kv-direct'),

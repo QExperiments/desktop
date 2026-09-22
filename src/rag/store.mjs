@@ -23,8 +23,11 @@ export const config = {
   tableName: process.env.LANCE_TABLE || 'meridian_corpus',
   embeddingModelId: process.env.EMBEDDING_MODEL || 'EMBEDDINGGEMMA_300M_Q8_0',
   chunkOpts: {
-    chunkSize: Number(process.env.CHUNK_SIZE || 512),
-    chunkOverlap: Number(process.env.CHUNK_OVERLAP || 64),
+    // 384/48 is the best chunk measured on the 133-query grid (C5 against
+    // B0, 2026-09-20): recall@3 86% against 83% at 512/64 and @5 95% against
+    // 94%, with 40 chunks instead of 34. 256/32 loses 1 pp at @3 and 2 at @5.
+    chunkSize: Number(process.env.CHUNK_SIZE || 384),
+    chunkOverlap: Number(process.env.CHUNK_OVERLAP || 48),
     chunkStrategy: process.env.CHUNK_STRATEGY || 'paragraph',
     // 'sentence' never splits in SDK 0.18.2: a 4 400-char report came back as one chunk.
     splitStrategy: process.env.CHUNK_SPLIT || 'token',

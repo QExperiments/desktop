@@ -74,6 +74,7 @@ export const createSessions = (dir) => {
     const messages = []
     const shown = []
     let base = 0
+    let from = 0
     for (const turn of turns) {
       const at = messages.length
       messages.push(...(turn.messages ?? [
@@ -82,8 +83,9 @@ export const createSessions = (dir) => {
       ]))
       if (turn.shown?.length) shown.push({ at, ids: turn.shown })
       if (Number.isFinite(turn.base)) base = turn.base
+      if (Number.isFinite(turn.from)) from = turn.from
     }
-    return { messages, shown, base }
+    return { messages, shown, base, from }
   }
 
   const history = async (id) => (await context(id)).messages

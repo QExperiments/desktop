@@ -8,11 +8,15 @@ import { buildCatalog, readRegistry } from './catalog.js'
 import { catalog, entryFor, provisionedTier, readManifest, targetsFor } from './models.js'
 import { createDirectChat } from './direct/client.js'
 import { createPeerMonitor, DELEGATED_ROLES, peerSwapBlocked } from './peer.js'
+import { createProfile } from './profile.js'
 
 const TIERS = ['L', 'M', 'S']
 const FETCH_HINT = 'run `npm run models:fetch`'
 
 export const createRuntime = ({ log = logger } = {}) => {
+  // Enabled before anything else so the profiler sees the model loads: the
+  // SDK records an operation only while it is on (I.6).
+  const profile = createProfile({ log })
   const registry = createCancelRegistry({ cancel: sdk.cancel })
   const loaded = new Map()
   const idleTimers = new Map()
@@ -431,6 +435,8 @@ export const createRuntime = ({ log = logger } = {}) => {
     loaded.clear()
     await direct?.close().catch((error) => log.warn({ err: error.message }, 'direct chat close failed'))
     direct = null
+    // Before close(): the export reads state the SDK owns.
+    await profile.dump().catch((error) => log.warn({ err: error.message }, 'profile dump failed'))
     await sdk.close()
     log.info({ cancelled }, 'runtime stopped')
   }
@@ -525,5 +531,5 @@ export const createRuntime = ({ log = logger } = {}) => {
     inflight: registry.list().map(({ abort, ...rest }) => rest),
   })
 
-  return { start, stop, acquire, release, completion, directChat, embed, deleteCache, transcribe, transcribeStream, speak, look, snapshot, modelCatalog, onIdleUnload, cancel: registry.stop }
+  return { start, stop, acquire, release, completion, directChat, embed, deleteCache, transcribe, transcribeStream, speak, look, snapshot, modelCatalog, onIdleUnload, cancel: registry.stop, profile }
 }
