@@ -181,10 +181,14 @@ export const replayHistory = (prior, layout = LAYOUT, base = layout === 'current
 export const isToolRound = (message) =>
   message.role === 'tool' || (message.role === 'assistant' && String(message.content ?? '').includes('<tool_call>'))
 
-// Tokens, near enough to decide a compaction: the corpus excerpts run about
-// 2.9 characters per token and prose about 4. No tokenizer call on the path
-// of a turn, and a wrong guess only moves the compaction by one turn.
-const CHARS_PER_TOKEN = 3.2
+// Tokens, near enough to decide a compaction. The SDK exposes no tokenizer
+// for the chat model, so this is calibrated against what the model actually
+// counted: over the 235 first turns of the 2026-09-21 and 2026-09-22 runs the
+// ratio ran 2.36 to 3.27 characters per token, median 2.78. The old 3.2 sat
+// above almost all of it and so under-counted on 234 of the 235 -- by 28% on
+// the turn that then died on `context overflow (34377 tokens, max 32768)`.
+// A compaction decision has to err high, so the constant is the low end.
+const CHARS_PER_TOKEN = 2.4
 export const estimateTokens = (messages) =>
   Math.round(messages.reduce((sum, message) => sum + String(message.content ?? '').length, 0) / CHARS_PER_TOKEN)
 

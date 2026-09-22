@@ -199,11 +199,13 @@ if (liveJobs.length) {
         const reply = await ask({ base: server.base, messages, session, run: runTag, timeoutMs: config.requestTimeoutMs })
         const trace = await readTrace(tracesDir, runTag, reply.requestId)
         const { excerpts, toolResults, hits } = contextOf(trace)
-        // multiquery answers may draw on excerpts shown earlier in the session, so
-        // `grounded` checks the numbers against everything shown so far.
-        const context = category === 'multiquery'
-          ? [...rows.map((r) => `${r.context}\n${r.toolResults}`), `${excerpts}\n${toolResults}`].join('\n')
-          : `${excerpts}\n${toolResults}`
+        // An answer may draw on excerpts shown earlier in the session, so
+        // `grounded` checks the numbers against everything shown so far, not
+        // only this turn. Scored per turn it called 44 turns of the
+        // 2026-09-21 run ungrounded, 16 of them turns that brought no
+        // excerpts at all; session-wide clears 48 of 59. On a single-turn
+        // case `rows` is empty and this is the turn's own context.
+        const context = [...rows.map((r) => `${r.context}\n${r.toolResults}`), `${excerpts}\n${toolResults}`].join('\n')
         const gold = turn.gold_doc_ids ?? job.case.gold_doc_ids ?? []
         // Retrieval is scored from the hits the model saw, with the files shown
         // earlier in the session. Every live category is scored the same way,
