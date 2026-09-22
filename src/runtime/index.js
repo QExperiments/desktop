@@ -4,7 +4,9 @@ import { logger } from '../logger.js'
 import { publicKeyFromSeed } from '../p2p/identity.js'
 import { createCancelRegistry } from './cancel.js'
 import { selectTier } from './capability.js'
+import { buildCatalog, readRegistry } from './catalog.js'
 import { catalog, entryFor, provisionedTier, readManifest, targetsFor } from './models.js'
+import { createDirectChat } from './direct/client.js'
 import { createPeerMonitor, DELEGATED_ROLES, peerSwapBlocked } from './peer.js'
 
 const TIERS = ['L', 'M', 'S']
@@ -18,6 +20,7 @@ export const createRuntime = ({ log = logger } = {}) => {
   let state = {
     ready: false,
     tier: null,
+    budgetBytes: null,
     hardware: null,
     reason: null,
     mode: 'local',
@@ -28,6 +31,9 @@ export const createRuntime = ({ log = logger } = {}) => {
   let monitor = null
   let chain = Promise.resolve()
   let stopped = false
+  // Called with the role after an idle unload; the server drops the sessions'
+  // KV files when chat goes (see unloadIdle for why).
+  const idleListeners = new Set()
 
   const serial = (task) => {
     const next = chain.then(task, task)
@@ -37,11 +43,49 @@ export const createRuntime = ({ log = logger } = {}) => {
 
   const peerTier = () => (config.assumeStrongPeer ? 'L' : state.tier)
 
+  // The direct engine keeps the chat model in its own Bare child, so it needs
+  // the weights on disk and the same model config the SDK would have applied.
+  // While it is on, the SDK never loads chat: two copies do not fit the fleet
+  // laptop.
+  const DIRECT = config.retrieval.engine === 'direct'
+  let direct = null
+  const directChat = async () => {
+    if (direct) return direct
+    const entry = entryFor(manifest, 'chat', state.tier)
+    if (!entry) throw new Error(`no chat model provisioned for tier ${state.tier} — ${FETCH_HINT}`)
+    const spec = catalog.roles.chat
+    const onGpu = (state.hardware?.backend ?? 'cpu') !== 'cpu'
+    direct = createDirectChat({ log })
+    await direct.load({
+      model: entry.path,
+      config: withChatOverrides('chat', {
+        device: onGpu ? 'gpu' : 'cpu',
+        ...(onGpu ? { gpu_layers: 99 } : {}),
+        ...spec.modelConfig,
+        ...spec.models[entry.tier]?.modelConfig,
+      }),
+      cacheDir: config.directCacheDir,
+    })
+    log.info({ tier: entry.tier, model: entry.constant, device: onGpu ? 'gpu' : 'cpu' }, 'direct chat engine loaded')
+    return direct
+  }
+  const isResident = (role) => catalog.roles[role]?.resident === true
+
   const srcOf = (entry) => (entry.source === 'registry' ? sdk[entry.constant] : entry.path)
+
+  // The chat role's context and its sliding window are the two settings an
+  // experiment moves without touching models.json (src/config.js).
+  const withChatOverrides = (role, modelConfig) => {
+    if (role !== 'chat') return modelConfig
+    if (config.chatCtx) modelConfig.ctx_size = config.chatCtx
+    if (config.chatDiscard) modelConfig.n_discarded = config.chatDiscard
+    return modelConfig
+  }
 
   const optionsFor = (entry, { delegated = false } = {}) => {
     const spec = catalog.roles[entry.role]
-    const modelConfig = { ...spec.modelConfig }
+    // Role-wide settings first, then what the tier's own model entry adds (ctx_size).
+    const modelConfig = withChatOverrides(entry.role, { ...spec.modelConfig, ...spec.models[entry.tier]?.modelConfig })
 
     for (const [key, role] of Object.entries(spec.companions ?? {})) {
       if (delegated) {
@@ -156,17 +200,45 @@ export const createRuntime = ({ log = logger } = {}) => {
 
   const acquire = (role, options) => serial(() => acquireNow(role, options))
 
-  const unloadNow = async (role) => {
+  const unloadNow = async (role, { idle = false } = {}) => {
     const held = loaded.get(role)
     if (!held) return
     clearTimeout(idleTimers.get(role))
     idleTimers.delete(role)
     await sdk.unloadModel({ modelId: held.modelId }).catch((error) => log.warn({ role, err: error.message }, 'unload failed'))
     loaded.delete(role)
-    log.info({ role }, 'model unloaded')
+    log.info({ role, idle }, 'model unloaded')
   }
 
-  const unload = (role) => serial(() => unloadNow(role))
+  // Idle unload. On-demand roles (speech, vision) go idleUnloadMs after their
+  // last user let go; resident roles (chat, embed) go residentIdleMs after
+  // their last request, and the next request loads them again (ADR-006). The
+  // unload runs on the serial chain, so a request that arrived after the timer
+  // fired and re-acquired the model is seen here and the unload is skipped.
+  const idleFor = (role) => (isResident(role) ? config.residentIdleMs : config.idleUnloadMs)
+  const inUse = (role, held) => (isResident(role) ? held.pins > 0 : held.refs > 0)
+
+  // Measured 2026-09-18 (tier M, dev Mac): after an unload and reload the SDK
+  // loads a session's KV file from disk and then prefills the whole history
+  // again on top of it, so the next turn cost 2385 prompt tokens instead of
+  // 626 and the context grew to 6.9k instead of 3.2k. The listeners delete
+  // the sessions' KV files instead, and the next turn primes a fresh file from
+  // the stored history: one clean prefill, the same as reopening an old session.
+  const unloadIdle = (role) => serial(async () => {
+    const held = loaded.get(role)
+    if (!held || inUse(role, held)) return
+    await unloadNow(role, { idle: true })
+    for (const listener of idleListeners) await Promise.resolve().then(() => listener(role)).catch((error) => log.warn({ role, err: error.message }, 'idle listener failed'))
+  })
+  const onIdleUnload = (listener) => { idleListeners.add(listener) }
+
+  const armIdle = (role) => {
+    const held = loaded.get(role)
+    const ms = idleFor(role)
+    if (!held || !(ms > 0) || inUse(role, held)) return
+    clearTimeout(idleTimers.get(role))
+    idleTimers.set(role, setTimeout(() => unloadIdle(role), ms).unref())
+  }
 
   const failoverNow = async () => {
     const roles = [...loaded.entries()].filter(([, held]) => held.delegated).map(([role]) => role)
@@ -185,6 +257,7 @@ export const createRuntime = ({ log = logger } = {}) => {
       if (!catalog.roles[role]?.resident) continue
       const { modelId, entry } = await loadWithFallback(role)
       remember(role, modelId, entry, false)
+      armIdle(role)
     }
   }
 
@@ -208,6 +281,7 @@ export const createRuntime = ({ log = logger } = {}) => {
         const local = await loadWithFallback(role)
         remember(role, local.modelId, local.entry, false)
       }
+      armIdle(role)
     }
   }
 
@@ -241,10 +315,8 @@ export const createRuntime = ({ log = logger } = {}) => {
     const held = loaded.get(role)
     if (!held) return
     if (held.pins > 0) held.pins -= 1
-    if (!catalog.roles[role]?.resident) {
-      held.refs -= 1
-      if (held.refs <= 0) idleTimers.set(role, setTimeout(() => unload(role), config.idleUnloadMs).unref())
-    }
+    if (!isResident(role)) held.refs -= 1
+    armIdle(role)
     void settlePeer()
   }
 
@@ -275,6 +347,7 @@ export const createRuntime = ({ log = logger } = {}) => {
   const start = async () => {
     const resources = await sdk.getSystemResources({ sample: true })
     const chosen = selectTier(resources, { ...catalog, override: config.tierOverride })
+    if (!chosen.tier) throw new Error(`${chosen.reason}; set MERIDIAN_TIER=S to try anyway`)
 
     manifest = await readManifest(config.manifestPath)
     if (!manifest) throw new Error(`no ${config.manifestPath} — ${FETCH_HINT}`)
@@ -315,6 +388,7 @@ export const createRuntime = ({ log = logger } = {}) => {
     state = {
       ...state,
       tier,
+      budgetBytes: chosen.budgetBytes ?? null,
       hardware: chosen.hardware,
       reason: chosen.reason,
       mode: peer.publicKey && !peer.online ? 'local-fallback' : 'local',
@@ -327,7 +401,13 @@ export const createRuntime = ({ log = logger } = {}) => {
       'runtime starting',
     )
 
-    for (const target of targetsFor(tier)) await acquire(target.role, { pin: false })
+    for (const target of targetsFor(tier)) {
+      if (DIRECT && target.role === 'chat') continue
+      await acquire(target.role, { pin: false })
+    }
+    if (DIRECT) await directChat()
+    // The idle clock of the resident roles starts at boot, not at the first request.
+    for (const target of targetsFor(tier)) if (!(DIRECT && target.role === 'chat')) armIdle(target.role)
     monitor?.watch()
     state.ready = true
 
@@ -349,6 +429,8 @@ export const createRuntime = ({ log = logger } = {}) => {
     }
 
     loaded.clear()
+    await direct?.close().catch((error) => log.warn({ err: error.message }, 'direct chat close failed'))
+    direct = null
     await sdk.close()
     log.info({ cancelled }, 'runtime stopped')
   }
@@ -370,6 +452,13 @@ export const createRuntime = ({ log = logger } = {}) => {
 
   const embed = (text) =>
     hold('embed', (modelId) => registry.run({ kind: 'embeddings', role: 'embed' }, () => sdk.embed({ modelId, text })))
+
+  // Drops the KV-cache files the SDK keeps for one session key (req 6.3
+  // cleanup). Nothing else on disk is touched; the session's turns stay.
+  const deleteCache = (kvCacheKey) => sdk.deleteCache({ kvCacheKey }).catch((error) => {
+    log.warn({ kvCacheKey, err: error.message }, 'kv-cache delete failed')
+    return { success: false }
+  })
 
   const transcribe = (audio, params = {}) =>
     hold('asr', (modelId) => registry.run({ kind: 'transcription', role: 'asr' }, () =>
@@ -404,20 +493,37 @@ export const createRuntime = ({ log = logger } = {}) => {
       }
     })
 
+  // GET /v1/models/catalog: read-only, from models.json, the manifest and the
+  // registry snapshot `models:list --refresh` left on disk. Never downloads.
+  const modelCatalog = async () => buildCatalog({
+    catalog, manifest, registry: await readRegistry(config.registryPath), tier: state.tier, budgetBytes: state.budgetBytes,
+  })
+
   const snapshot = () => ({
     ...state,
     peerOnline: peer.online,
-    models: [...loaded].map(([role, held]) => ({
-      role,
-      modelId: held.modelId,
-      tier: held.entry.tier,
-      source: held.entry.source,
-      constant: held.entry.constant,
-      delegated: held.delegated === true,
-    })),
+    residentIdleMs: config.residentIdleMs,
+    // Resident roles that gave their memory back after residentIdleMs without a
+    // request; the next request loads them again. Empty while everything is up.
+    unloaded: state.ready ? Object.keys(catalog.roles).filter((role) => isResident(role) && catalog.roles[role].models[state.tier] && !loaded.has(role) && !(DIRECT && role === 'chat' && direct)) : [],
+    models: [
+      // The direct engine holds chat outside the SDK's registry, so /health
+      // would otherwise report a server running without a chat model.
+      ...(DIRECT && direct && state.ready
+        ? [{ role: 'chat', modelId: 'direct', tier: entryFor(manifest, 'chat', state.tier)?.tier ?? state.tier, source: entryFor(manifest, 'chat', state.tier)?.source ?? null, constant: entryFor(manifest, 'chat', state.tier)?.constant ?? null, delegated: false, engine: 'direct' }]
+        : []),
+      ...[...loaded].map(([role, held]) => ({
+        role,
+        modelId: held.modelId,
+        tier: held.entry.tier,
+        source: held.entry.source,
+        constant: held.entry.constant,
+        delegated: held.delegated === true,
+      })),
+    ],
     onDemand: Object.keys(catalog.roles).filter((role) => !catalog.roles[role].required && entryFor(manifest, role, state.tier)),
     inflight: registry.list().map(({ abort, ...rest }) => rest),
   })
 
-  return { start, stop, acquire, release, completion, embed, transcribe, transcribeStream, speak, look, snapshot, cancel: registry.stop }
+  return { start, stop, acquire, release, completion, directChat, embed, deleteCache, transcribe, transcribeStream, speak, look, snapshot, modelCatalog, onIdleUnload, cancel: registry.stop }
 }

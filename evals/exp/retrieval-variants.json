@@ -1,0 +1,205 @@
+{
+  "_doc": "Retrieval experiment variants (docs/todo-3-exp.md). name -> { axis, change, env }. B0's env pins the pre-ADR-013 defaults and is the base of every other variant; a variant's env is merged on top. LANCE_DB_DIR is set per variant by evals/retrieval-exp.mjs.",
+  "B0": {
+    "axis": "base",
+    "change": "pre-ADR-013 defaults: embeddinggemma-300M-Q8_0, 768 dims, chunk 512/64 paragraph+token, no prefixes, RRF k=60 over top-k per leg, BM25 weight 1, FTS simple+stem+stopwords",
+    "env": {
+      "EMBED_PREFIX": "none",
+      "RRF_BM25_WEIGHT": "1"
+    }
+  },
+  "E1": {
+    "axis": "embedding",
+    "change": "EMBEDDINGGEMMA_300M_Q4_0 (278 MB)",
+    "env": {
+      "EMBEDDING_MODEL": "EMBEDDINGGEMMA_300M_Q4_0"
+    }
+  },
+  "E2": {
+    "axis": "embedding",
+    "change": "EMBEDDINGGEMMA_300M_BF16 (612 MB)",
+    "env": {
+      "EMBEDDING_MODEL": "EMBEDDINGGEMMA_300M_BF16"
+    }
+  },
+  "E3": {
+    "axis": "embedding",
+    "change": "GTE_LARGE_FP16 (335M, 1024 dims, ctx 512, 670 MB) with chunk 384/48 (its BERT tokenizer counts a 512-token Gemma chunk as 604; compare with C5)",
+    "env": {
+      "EMBEDDING_MODEL": "GTE_LARGE_FP16",
+      "CHUNK_SIZE": "384",
+      "CHUNK_OVERLAP": "48"
+    },
+    "control": "C5"
+  },
+  "C1": {
+    "axis": "chunking",
+    "change": "chunk 256 / overlap 32",
+    "env": {
+      "CHUNK_SIZE": "256",
+      "CHUNK_OVERLAP": "32"
+    }
+  },
+  "C2": {
+    "axis": "chunking",
+    "change": "chunk 128 / overlap 16",
+    "env": {
+      "CHUNK_SIZE": "128",
+      "CHUNK_OVERLAP": "16"
+    }
+  },
+  "C3": {
+    "axis": "chunking",
+    "change": "chunk 1024 / overlap 64",
+    "env": {
+      "CHUNK_SIZE": "1024",
+      "CHUNK_OVERLAP": "64"
+    }
+  },
+  "C4": {
+    "axis": "chunking",
+    "change": "chunkStrategy character (no paragraph alignment), 512/64",
+    "env": {
+      "CHUNK_STRATEGY": "character"
+    }
+  },
+  "P1": {
+    "axis": "preparation",
+    "change": "EmbeddingGemma task prefixes: doc `title: <file> | text:`, query `task: search result | query:`",
+    "env": {
+      "EMBED_PREFIX": "gemma"
+    }
+  },
+  "P2": {
+    "axis": "preparation",
+    "change": "file header line in every chunk (file · type · subject), embedded and indexed",
+    "env": {
+      "CHUNK_HEADER": "1"
+    }
+  },
+  "P3": {
+    "axis": "preparation",
+    "change": "CSV rows and JSON records as their own chunks",
+    "env": {
+      "CSV_ROW_CHUNKS": "1"
+    }
+  },
+  "P4": {
+    "axis": "preparation",
+    "change": "Matryoshka truncation 768 -> 256 dims, renormalised",
+    "env": {
+      "EMBED_DIMS": "256"
+    }
+  },
+  "F1": {
+    "axis": "fusion",
+    "change": "RRF over the top-10 of each leg, then cut to k",
+    "env": {
+      "RRF_CANDIDATES": "10"
+    }
+  },
+  "F2": {
+    "axis": "fusion",
+    "change": "BM25 leg weight 1.5 in RRF",
+    "env": {
+      "RRF_BM25_WEIGHT": "1.5"
+    }
+  },
+  "F3": {
+    "axis": "fts",
+    "change": "FTS without stemming and stop-word removal",
+    "env": {
+      "FTS_STEM": "0",
+      "FTS_STOPWORDS": "0"
+    }
+  },
+  "F4": {
+    "axis": "fts",
+    "change": "FTS ngram tokenizer (3-grams) for the BM25 leg",
+    "env": {
+      "FTS_TOKENIZER": "ngram",
+      "FTS_NGRAM": "3"
+    }
+  },
+  "C5": {
+    "axis": "chunking",
+    "change": "chunk 384 / overlap 48 (control for E3)",
+    "env": {
+      "CHUNK_SIZE": "384",
+      "CHUNK_OVERLAP": "48"
+    }
+  },
+  "F2b": {
+    "axis": "fusion-sweep",
+    "change": "BM25 leg weight 2.0 in RRF",
+    "env": {
+      "RRF_BM25_WEIGHT": "2"
+    }
+  },
+  "F2c": {
+    "axis": "fusion-sweep",
+    "change": "BM25 leg weight 1.25 in RRF",
+    "env": {
+      "RRF_BM25_WEIGHT": "1.25"
+    }
+  },
+  "F5": {
+    "axis": "fusion-sweep",
+    "change": "RRF k = 20 instead of 60 (weights 1/1)",
+    "env": {
+      "RRF_K": "20"
+    }
+  },
+  "A1": {
+    "axis": "ablation",
+    "change": "BEST without E1: Q8_0 + character chunks + gemma prefixes + BM25 weight 1.5",
+    "env": {
+      "CHUNK_STRATEGY": "character",
+      "EMBED_PREFIX": "gemma",
+      "RRF_BM25_WEIGHT": "1.5"
+    }
+  },
+  "A2": {
+    "axis": "ablation",
+    "change": "BEST without C4: Q4_0 + paragraph chunks + gemma prefixes + BM25 weight 1.5",
+    "env": {
+      "EMBEDDING_MODEL": "EMBEDDINGGEMMA_300M_Q4_0",
+      "EMBED_PREFIX": "gemma",
+      "RRF_BM25_WEIGHT": "1.5"
+    }
+  },
+  "A3": {
+    "axis": "ablation",
+    "change": "BEST without P1: Q4_0 + character chunks + BM25 weight 1.5, no prefixes",
+    "env": {
+      "EMBEDDING_MODEL": "EMBEDDINGGEMMA_300M_Q4_0",
+      "CHUNK_STRATEGY": "character",
+      "RRF_BM25_WEIGHT": "1.5"
+    }
+  },
+  "A4": {
+    "axis": "ablation",
+    "change": "BEST without F2: Q4_0 + character chunks + gemma prefixes, BM25 weight 1",
+    "env": {
+      "EMBEDDING_MODEL": "EMBEDDINGGEMMA_300M_Q4_0",
+      "CHUNK_STRATEGY": "character",
+      "EMBED_PREFIX": "gemma"
+    }
+  },
+  "A5": {
+    "axis": "ablation",
+    "change": "minimal pair: gemma prefixes + BM25 weight 1.5 on Q8_0, paragraph chunks (= production defaults since ADR-013)",
+    "env": {
+      "EMBED_PREFIX": "gemma",
+      "RRF_BM25_WEIGHT": "1.5"
+    }
+  },
+  "A6": {
+    "axis": "ablation",
+    "change": "prefixes + BM25 weight 2.0 on Q8_0, paragraph chunks",
+    "env": {
+      "EMBED_PREFIX": "gemma",
+      "RRF_BM25_WEIGHT": "2"
+    }
+  }
+}

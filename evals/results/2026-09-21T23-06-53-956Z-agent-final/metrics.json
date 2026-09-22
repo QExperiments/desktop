@@ -1,0 +1,397 @@
+{
+  "header": {
+    "ts": "2026-09-21T23-06-53-956Z",
+    "tier": "M",
+    "runs": 1,
+    "variant": "agent-final",
+    "serverEnv": {
+      "MERIDIAN_RETRIEVAL_MODE": "tool",
+      "MERIDIAN_CONTEXT_LAYOUT": "current",
+      "MERIDIAN_CONTEXT_BUDGET": "26214",
+      "MERIDIAN_CONTEXT_KEEP_MESSAGES": "10",
+      "MERIDIAN_DROP_TOOL_ROUNDS": "1",
+      "MERIDIAN_AGENT_PROMPT": "1",
+      "MERIDIAN_CHAT_TOPK": "5"
+    },
+    "config": {
+      "port": 11435,
+      "runs": 3,
+      "sampleMs": 500,
+      "tier": "M",
+      "mode": "live",
+      "requestTimeoutMs": 300000,
+      "models": {
+        "S": null,
+        "M": null,
+        "L": null
+      },
+      "judge": {
+        "backend": "local",
+        "constant": "QWEN3_5_9B_MULTIMODAL_Q4_K_M",
+        "batch": 1,
+        "ctx": 16384,
+        "temp": 0,
+        "predict": 900,
+        "cliModel": "haiku",
+        "cliParallel": 4
+      },
+      "judgeCategories": [
+        "single",
+        "multiquery"
+      ],
+      "ctx": {
+        "S": 32768,
+        "M": 32768,
+        "L": 32768
+      },
+      "predict": 320,
+      "variants": {
+        "baseline": {
+          "env": {},
+          "note": "the defaults: layout current, 5 chunks a turn, the last three questions in the search text of a follow-up"
+        },
+        "tool-retrieval": {
+          "env": {
+            "MERIDIAN_RETRIEVAL_MODE": "tool"
+          },
+          "note": "search before the first turn only; later turns call search_documents"
+        },
+        "rewrite": {
+          "env": {
+            "MERIDIAN_QUERY_REWRITE": "1"
+          },
+          "note": "turns with history search for a model-rewritten standalone query"
+        },
+        "cosine": {
+          "env": {
+            "MERIDIAN_FUSION": "cosine"
+          },
+          "note": "vector ranking alone, no BM25 leg"
+        },
+        "bm25": {
+          "env": {
+            "MERIDIAN_FUSION": "bm25"
+          },
+          "note": "full-text ranking alone, no vector leg"
+        },
+        "context-all-k5": {
+          "env": {
+            "MERIDIAN_CONTEXT_LAYOUT": "all"
+          },
+          "note": "excerpts accumulate as before (KV reused end to end) with today's k and search text: the layout control"
+        },
+        "shipped-0920": {
+          "env": {
+            "MERIDIAN_CONTEXT_LAYOUT": "all",
+            "MERIDIAN_CHAT_TOPK": "3",
+            "QUERY_HISTORY_TURNS": "1"
+          },
+          "note": "what serve did before 2026-09-21: excerpts of every turn stay in the context, 3 chunks a turn, the question alone as the search text"
+        },
+        "budget-8k": {
+          "env": {
+            "MERIDIAN_CONTEXT_BUDGET": "8000"
+          },
+          "note": "layout current with a context budget: the excerpts stay in the cached prefix until the context crosses 8k, then one clean prefill"
+        },
+        "budget-5k": {
+          "env": {
+            "MERIDIAN_CONTEXT_BUDGET": "5000"
+          },
+          "note": "as budget-8k, compacting twice as often"
+        },
+        "direct-k5": {
+          "env": {
+            "MERIDIAN_CHAT_ENGINE": "direct"
+          },
+          "note": "the direct addon engine: the cached state holds the bare conversation, this turn's excerpts live in a throwaway key (docs/todo-5.md)"
+        },
+        "discard-all-8k": {
+          "env": {
+            "MERIDIAN_CONTEXT_LAYOUT": "all",
+            "MERIDIAN_CHAT_CTX": "8192",
+            "MERIDIAN_CHAT_DISCARD": "2048"
+          },
+          "note": "the same on half the context, so the window fires from the fourth or fifth turn of a session instead of only on the longest ones"
+        },
+        "all-8k-nodiscard": {
+          "env": {
+            "MERIDIAN_CONTEXT_LAYOUT": "all",
+            "MERIDIAN_CHAT_CTX": "8192"
+          },
+          "note": "the control for discard-all-8k: same layout and context, window off, so the turn that crosses 8192 throws context overflow and takes the session's KV state with it"
+        },
+        "tools-in-system": {
+          "env": {
+            "MERIDIAN_TOOLS_IN_SYSTEM": "1"
+          },
+          "note": "the tool declarations are written into the system prompt, which the prime protects, instead of being handed to the SDK; calls are read out of the model's text (docs/todo-6.md)"
+        },
+        "tools-in-system-discard": {
+          "env": {
+            "MERIDIAN_TOOLS_IN_SYSTEM": "1",
+            "MERIDIAN_CONTEXT_LAYOUT": "all",
+            "MERIDIAN_CHAT_CTX": "8192",
+            "MERIDIAN_CHAT_DISCARD": "2048"
+          },
+          "note": "discard-all-8k with the declarations in the system prompt: the 439 tokens a turn the evictable block costs should go away"
+        },
+        "tool-window-5": {
+          "env": {
+            "MERIDIAN_RETRIEVAL_MODE": "tool",
+            "MERIDIAN_CONTEXT_KEEP_TURNS": "5",
+            "MERIDIAN_CONTEXT_BUDGET": "8000"
+          },
+          "note": "retrieval runs automatically for the first turn only, later turns call search_documents; the turn that crosses 8k keeps the last five exchanges and drops the rest"
+        },
+        "tool-window-8": {
+          "env": {
+            "MERIDIAN_RETRIEVAL_MODE": "tool",
+            "MERIDIAN_CONTEXT_KEEP_TURNS": "8",
+            "MERIDIAN_CONTEXT_BUDGET": "8000"
+          },
+          "note": "the same with a window of eight exchanges"
+        },
+        "tool-window-5-tight": {
+          "env": {
+            "MERIDIAN_RETRIEVAL_MODE": "tool",
+            "MERIDIAN_CONTEXT_KEEP_TURNS": "5",
+            "MERIDIAN_CONTEXT_BUDGET": "2800"
+          },
+          "note": "tool-window-5 with a budget the bare history actually reaches, so the window fires: without tool rounds a fifteen-turn replay is only about 2400 tokens and 8000 is never crossed"
+        },
+        "agent-loop-12k": {
+          "env": {
+            "MERIDIAN_RETRIEVAL_MODE": "tool",
+            "MERIDIAN_CONTEXT_LAYOUT": "current",
+            "MERIDIAN_CONTEXT_BUDGET": "12000",
+            "MERIDIAN_CONTEXT_KEEP_MESSAGES": "10",
+            "MERIDIAN_DROP_TOOL_ROUNDS": "1",
+            "MERIDIAN_AGENT_PROMPT": "1"
+          },
+          "note": "the agent loop: retrieval through search_documents, history appended and never rewritten between compactions so the KV cache holds, and the turn that crosses 12000 drops the earlier tool rounds and keeps the last ten messages (docs/todo-8.md)"
+        },
+        "agent-loop-20pct": {
+          "env": {
+            "MERIDIAN_RETRIEVAL_MODE": "tool",
+            "MERIDIAN_CONTEXT_LAYOUT": "current",
+            "MERIDIAN_CONTEXT_BUDGET": "3277",
+            "MERIDIAN_CONTEXT_KEEP_MESSAGES": "10",
+            "MERIDIAN_DROP_TOOL_ROUNDS": "1",
+            "MERIDIAN_AGENT_PROMPT": "1"
+          },
+          "note": "the agent loop with the budget at a literal 20% of ctx_size (3277 on M): one tool result is about 2700 tokens, so the threshold is crossed on every turn and the cache never survives one"
+        },
+        "agent-final": {
+          "env": {
+            "MERIDIAN_RETRIEVAL_MODE": "tool",
+            "MERIDIAN_CONTEXT_LAYOUT": "current",
+            "MERIDIAN_CONTEXT_BUDGET": "26214",
+            "MERIDIAN_CONTEXT_KEEP_MESSAGES": "10",
+            "MERIDIAN_DROP_TOOL_ROUNDS": "1",
+            "MERIDIAN_AGENT_PROMPT": "1",
+            "MERIDIAN_CHAT_TOPK": "5"
+          },
+          "note": "config 2: the agent searches for itself on every turn, the first included; budget 26214 (0.8 x 32k), compaction keeps the last messages and drops the tool rounds"
+        }
+      }
+    },
+    "judge": null,
+    "judgeBackend": "local",
+    "coldStartMs": 3541,
+    "hardware": {
+      "totalBytes": 25769803776,
+      "cpu": "Apple M4 Pro",
+      "gpu": "Apple M4 Pro",
+      "backend": "metal",
+      "dedicatedGpu": false
+    },
+    "chatModel": "QWEN3_5_2B_MULTIMODAL_Q4_K_M",
+    "embedModel": "EMBEDDINGGEMMA_300M_Q8_0",
+    "servedTier": "M"
+  },
+  "latency": {
+    "n": 133,
+    "errors": 0,
+    "ttft_p50": 422.4,
+    "ttft_p95": 477.9,
+    "ttft_client_p50": 4905,
+    "tps_p50": 101,
+    "total_p50": 5829,
+    "total_p95": 9242,
+    "prefill_tps_p50": 1417,
+    "cache_ratio_mean": 0.338,
+    "prompt_tokens_mean": 3728.767,
+    "completion_tokens_mean": 338.383,
+    "thinking_chars_mean": 960.038
+  },
+  "agentsearch": {
+    "n": 133,
+    "n_turns": 133,
+    "k": 5,
+    "all": {
+      "n": 133,
+      "recall": 0.9172932330827067,
+      "precision": 0.40902255639097806,
+      "hit": 0.9473684210526315,
+      "mrr": 0.9160401002506265,
+      "evidence_in_context": 0.9473684210526315,
+      "context_recall": 0.9172932330827067
+    },
+    "followup": {
+      "n": 0,
+      "recall": null,
+      "precision": null,
+      "hit": null,
+      "mrr": null,
+      "evidence_in_context": null,
+      "context_recall": null
+    },
+    "standalone": {
+      "n": 133,
+      "recall": 0.9172932330827067,
+      "precision": 0.40902255639097806,
+      "hit": 0.9473684210526315,
+      "mrr": 0.9160401002506265,
+      "evidence_in_context": 0.9473684210526315,
+      "context_recall": 0.9172932330827067
+    },
+    "no_answer": {
+      "n": 0,
+      "abstained_rate": null,
+      "grounded_rate": null
+    },
+    "searches_per_turn": 0.97,
+    "turns_with_search": 0.955,
+    "citations_mean": 4.421,
+    "must_rate": null,
+    "number_match_mean": null,
+    "grounded_rate": 0.962,
+    "citation_precision_mean": 0.4,
+    "citation_recall_mean": 0.917,
+    "lang_rate": 1,
+    "empty_rate": 0,
+    "leak_rate": 0,
+    "abstained_rate": 0.023,
+    "tokens": {
+      "n": 133,
+      "prompt_mean": 3728.767,
+      "prefill_mean": 2455.556,
+      "cached_mean": 1273.211,
+      "completion_mean": 338.383,
+      "completion_p50": 312,
+      "completion_max": 675,
+      "total_mean": 4067.15,
+      "context_mean": 2951.308,
+      "context_max": 3890,
+      "rewrite_mean": null,
+      "rewrite_turns": 0,
+      "rewrite_used": null,
+      "rewrite_ms_mean": null,
+      "session_total_mean": 4067.15,
+      "session_prefill_mean": 2455.556,
+      "fresh_excerpts_mean": 4.812,
+      "turns_with_fresh_excerpts": 0.955,
+      "search_calls_per_turn": 0.97,
+      "turns_with_search": 0.955,
+      "retrieval_ms_mean": 31.677
+    },
+    "latency": {
+      "n": 133,
+      "errors": 0,
+      "ttft_p50": 422.4,
+      "ttft_p95": 477.9,
+      "ttft_client_p50": 4905,
+      "tps_p50": 101,
+      "total_p50": 5829,
+      "total_p95": 9242,
+      "prefill_tps_p50": 1417,
+      "cache_ratio_mean": 0.338,
+      "prompt_tokens_mean": 3728.767,
+      "completion_tokens_mean": 338.383,
+      "thinking_chars_mean": 960.038
+    },
+    "stats": {
+      "turns": 133,
+      "calls": 140,
+      "calls_per_turn": 1.05,
+      "turns_with_tool": 0.9924812030075187,
+      "per_tool": {
+        "search_documents": 129,
+        "list_documents": 6,
+        "lookup_stock": 5
+      },
+      "rounds_mean": 2.05,
+      "repeat_calls": 0,
+      "limit_hits": 0,
+      "tool_errors": 0,
+      "tool_ms_total": 4349
+    }
+  },
+  "hardware": {
+    "phases": {
+      "before_load": {
+        "samples": 14,
+        "rss_tree_peak": null,
+        "rss_tree_mean": null,
+        "rss_bare_peak": null,
+        "footprint_bare_peak": null,
+        "footprint_bare_mean": null,
+        "system_used_mean": 19305872237.714,
+        "system_used_peak": 20983496704,
+        "cpu_mean": null,
+        "gpu_util_mean": 6
+      },
+      "loaded_idle": {
+        "samples": 8,
+        "rss_tree_peak": 2360066048,
+        "rss_tree_mean": 2356180992,
+        "rss_bare_peak": 2248769536,
+        "footprint_bare_peak": 818937856,
+        "footprint_bare_mean": 753795072,
+        "system_used_mean": 20116240384,
+        "system_used_peak": 20686897152,
+        "cpu_mean": 0.9,
+        "gpu_util_mean": 4.25
+      },
+      "generating": {
+        "samples": 1617,
+        "rss_tree_peak": 2408235008,
+        "rss_tree_mean": 2277044419.048,
+        "rss_bare_peak": 2277179392,
+        "footprint_bare_peak": 858783744,
+        "footprint_bare_mean": 740358206.061,
+        "system_used_mean": 20720909444.354,
+        "system_used_peak": 21513699328,
+        "cpu_mean": 241.108,
+        "gpu_util_mean": 91.698
+      },
+      "after_generation": {
+        "samples": 5,
+        "rss_tree_peak": 2296184832,
+        "rss_tree_mean": 1832393113.6,
+        "rss_bare_peak": 2029584384,
+        "footprint_bare_peak": 715128832,
+        "footprint_bare_mean": 695468032,
+        "system_used_mean": 20428629606.4,
+        "system_used_peak": 20540342272,
+        "cpu_mean": 84.82,
+        "gpu_util_mean": 14.6
+      },
+      "after_unload": {
+        "samples": 9,
+        "rss_tree_peak": null,
+        "rss_tree_mean": 0,
+        "rss_bare_peak": null,
+        "footprint_bare_peak": null,
+        "footprint_bare_mean": null,
+        "system_used_mean": 18737885639.111,
+        "system_used_peak": 18921127936,
+        "cpu_mean": 0,
+        "gpu_util_mean": 1.667
+      }
+    },
+    "system_used_delta_load": 810368146.2859993,
+    "system_used_delta_after_unload": -567986598.6030006
+  }
+}

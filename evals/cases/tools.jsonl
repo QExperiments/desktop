@@ -1,0 +1,11 @@
+{"id":"tools-01","messages":[{"role":"user","content":"How many ServoDrive X4 are available in EMEA?"}],"tool":"lookup_stock","args":{"sku":"SD-X4-001","region":"EMEA"},"must":["\\b14\\b"],"tags":["lang:en"]}
+{"id":"tools-02","messages":[{"role":"user","content":"How many ServoDrive X4 are available in EMEA?"},{"role":"assistant","content":"14 units are available in EMEA (as of 2026-06-30)."},{"role":"user","content":"And in APAC?"}],"tool":"lookup_stock","args":{"sku":"SD-X4-001","region":"APAC"},"must":["\\b6\\b"],"tags":["lang:en"]}
+{"id":"tools-03","messages":[{"role":"user","content":"What is the lead time for SD-X4-001?"}],"tool":"lookup_stock","args":{"sku":"SD-X4-001"},"must":["5 days","5 business days","five days"],"tags":["lang:en"]}
+{"id":"tools-04","messages":[{"role":"user","content":"What's the availability for SKU FOO-999?"}],"tool":"lookup_stock","args":{"sku":"FOO-999"},"must":["no record","not found","unknown","no match","does not exist"],"tags":["lang:en"]}
+{"id":"tools-05","messages":[{"role":"user","content":"How many ServoDrive X4 Harsh-Environment units are available in APAC?"}],"tool":"lookup_stock","args":{"sku":"SD-X4-HE","region":"APAC"},"must":["\\b5\\b"],"tags":["lang:en"]}
+{"id":"tools-06","messages":[{"role":"user","content":"Which documents do you have access to?"}],"tool":"list_documents","args":{},"must":["warranty-terms","sla-reminder","sku-list-prices"],"tags":["lang:en"]}
+{"id":"tools-07","messages":[{"role":"user","content":"List all the files in the corpus."}],"tool":"list_documents","args":{},"must":["warranty-terms","sla-reminder","sku-list-prices"],"tags":["lang:en"]}
+{"id":"tools-08","messages":[{"role":"user","content":"What is the standard warranty for the ServoDrive X4?"}],"tool":null,"args":null,"must":["24 months","24-month"],"tags":["lang:en"]}
+{"id":"tools-09","messages":[{"role":"user","content":"What is the P1 first-response SLA?"}],"tool":null,"args":null,"must":["4 hours","four hours","4-hour"],"tags":["lang:en"]}
+{"id":"tools-10","messages":[{"role":"user","content":"What is the multi-site package discount for ControLink Suite?"}],"tool":null,"args":null,"must":["8%","8 percent"],"tags":["lang:en"]}
+{"id":"tools-11","messages":[{"role":"user","content":"What was the Q2 logo churn percentage?"}],"tool":null,"args":null,"must":["3.1%","3.1 percent"],"tags":["lang:en"]}

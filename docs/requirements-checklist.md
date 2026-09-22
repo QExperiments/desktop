@@ -25,7 +25,9 @@ that are not code.
   *Three: `--source registry` (QVAC registry), `--source https` (HuggingFace
   mirror, resumable), `--source fs --from-dir` (MDM-provisioned directory).
   `pear://` is available in the SDK but unused — see the note under Req #6.2.
-  Weights are fetched at setup time, never bundled.*
+  Weights are fetched at setup time, never bundled. `npm run models:list
+  [--refresh]` and `GET /v1/models/catalog` show every role and tier with
+  provisioned / in-registry / fits-budget status; the server never downloads.*
 - [x] **1.3** Lifecycle `loadModel` → inference → `unloadModel` → `close`.
   *`src/runtime/index.js`; e2e test `loads the resident models and reports the
   tier it serves`.*
@@ -49,21 +51,23 @@ that are not code.
   in tokens, so 512 keeps three chunks inside the chat context.*
 - [x] **2.2** RAG over the private corpus with QVAC embeddings, answers carry
   citations to the source document.
-  *`src/chat/answer.js`: every question runs `search()`, the top chunks go into
-  the system prompt with "do not invent facts beyond it", `citations` carries
-  `{ file, score }`. Verified live against the corpus: ServoDrive X4 list price
-  $48,500, P2 SLA 8 hours, P1 SLA 4 hours, each with the right files cited; a
-  question the corpus cannot answer gets "not mentioned in the provided
-  context". Two loose ends: no unit test touches `src/rag/` (the recall harness
-  in `retrieve.mjs` is ready for one), and `grounded` is true whenever retrieval
-  returned anything, even for that unanswerable question.*
+  *`src/chat/answer.js`: every query runs `search()`, the top three chunks
+  open the user turn as "Document excerpts" under a fixed system prompt
+  (ADR-011), `citations` carries `{ file, score }` and, for a chunk already in
+  the session's context, `reused: true`. Verified live against the corpus:
+  ServoDrive X4 list price $48,500, P2 SLA 8 hours, P1 SLA 4 hours, each with
+  the right files cited; a question the corpus cannot answer gets "not
+  mentioned in the provided context". `evals/` now measures retrieval
+  (recall@k, MRR) and grounding on every run; `grounded` in the API response
+  still means "retrieval returned something".*
 - [x] **2.3** Persist embeddings to a local vector store, schema matched to the
   embedding model's dimensionality.
   *LanceDB in `src/rag/store.mjs`, table `meridian_corpus` under `data/lancedb`.
   Rows are `{ id, vector, text, ...metadata }` built through `ragChunk()` and
   `embed()`, so the vector width comes from the embedding model itself rather
   than a hard-coded number. Search is hybrid: cosine plus a full-text index,
-  the two rankings fused.*
+  the two rankings fused; `MERIDIAN_FUSION=cosine|bm25` keeps one leg for the
+  eval's A/B (ADR-012), the default stays `rrf`.*
 - [x] **2.4** Streaming generation.
   *`stream: true` on `/v1/chat/completions` returns OpenAI SSE: a role chunk,
   one chunk per token, a final chunk with `citations` and `grounded`, then
@@ -211,16 +215,16 @@ and says so.**
     one host, application code 1.1 MB. The app bundle is measured, not what
     `npm run serve` runs: `src/config.js` resolves paths from its own location.*
 - [x] **6.3** Reuse the KV cache across turns with a per-session key.
-  *Session from the OpenAI `user` field or `x-session-id`, passed as `kvCache`;
-  earlier turns forwarded so the model has the conversation either way
-  (ADR-010). Measured on tier M: the tool loop's second round logs `REUSING
-  cache` and sends one message, 5.0 s against 6.8 s uncached; follow-ups answer
-  from memory ("repeat that in one word" → "8"). Across turns a hit needs the
-  same retrieved context, so topic changes miss. Each cache file is ~33 MB and
-  nothing deletes them yet; the two mitigations are written down in ADR-010.*
+  *Session from the OpenAI `user` field or `x-session-id`, passed as `kvCache`.
+  The system prompt is fixed and the excerpts ride in the user turn, so one
+  session has one cache file and every turn hits it (ADR-011); the session
+  store replays the messages exactly as the model saw them. Measured on tier
+  M: turn two processed 15 prompt tokens against 1776 from the cache, first
+  token after 45 ms instead of 935 ms; a four-turn session left one file.
+  Every answer returns `usage` with `cached_tokens`. Files of sessions past
+  the newest five are deleted when a new session starts.*
 
-**Block status: complete. Open questions are operational: cache cleanup, and
-running from the bundle.**
+**Block status: complete. Open question: running from the bundle.**
 
 ---
 
@@ -236,6 +240,7 @@ start before the quality debt under "Where this stands" is paid.
 - [ ] **I.2** Simultaneous completion runs via continuous batching, merged event
   stream, per-prompt cancellation
   - [ ] **I.2.1** Report batch-level throughput versus sequential completions
+    — embed path measured 2026-09-20 (`evals/embed-batch.mjs`, `evals/results/embed-batch-2026-09-20/report.md`): one array `embed()` is ×6 faster than sequential calls on 133 short queries (×1.7 on CPU), ×1.1 on 34 long chunks; concurrent single calls are rejected by the engine (one job at a time); `cancel({ requestId })` stops an array request in ~12 ms. `batchCompletion` for the LLM still to measure.
 - [ ] **I.3** TurboQuant KV-cache quantization at `loadModel`, combined with the
   session `kvCache` path; note the backend in the report
 - [ ] **I.4** Drive one capability through the native C++ addon directly,
@@ -316,13 +321,17 @@ are not code.
 1. **Tier S has no tools.** The 8 GB floor answers from the corpus and says
    when it cannot; stock questions need tier M. Either accept and state it to
    Meridian, or find a layout that works for Qwen3-0.6B (six were tried).
-2. **`src/rag/` imports the SDK directly and loads EmbeddingGemma a second
-   time** (2 × 328 MB) — the two M-3 regressions under Req #2. Putting it
-   behind the runtime restores D3 and the cancel registry.
-3. **No unit test touches `src/rag/`.** The recall harness in `retrieve.mjs`
-   has the query set; it needs a runner and a threshold.
-4. **KV cache files accumulate** at ~33 MB per session and system prompt.
-   ADR-010 names the two fixes.
+2. **`src/rag/` still imports the SDK directly** for the CLI ingest; the
+   server's search now borrows the runtime's embedder, so the second
+   EmbeddingGemma copy is gone. Cancel registry coverage of retrieval remains.
+3. **Retrieval is measured, not unit-tested.** `evals/cases/retrieval.jsonl`
+   and `npm run eval -- --only retrieval` give recall@k and MRR per run; a
+   threshold in CI is still open.
+4. **Qwen3.5-2B needs its thinking to route tools** (see `models.json`,
+   chat role note): with thinking off it answers "you should call
+   lookup_stock" instead of calling it; with thinking on a turn costs 4–10 s
+   and once 47 s. `reasoning_budget` only works as 0 in this addon and
+   `predict` does not cap the scratchpad.
 5. **`grounded` means "retrieval returned something"**, not "the answer is
    supported". A score threshold would make it honest.
 6. **The app bundle is measured, not run.** `npm run serve` still starts from

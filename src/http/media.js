@@ -56,17 +56,20 @@ export const registerMedia = (app, runtime, sessions) => {
     // Multipart fields must precede the file to be readable here.
     const language = field(part, 'language', 'en')
     const session = field(part, 'session', '')
-    const question = String(await withUpload(part, (path) => runtime.transcribe(path))).trim()
-    if (!question) return reply.code(400).send({ error: { message: 'no speech recognised in the recording', type: 'invalid_request_error' } })
+    const query = String(await withUpload(part, (path) => runtime.transcribe(path))).trim()
+    if (!query) return reply.code(400).send({ error: { message: 'no speech recognised in the recording', type: 'invalid_request_error' } })
     // No client history on this route: earlier turns of the session come from the store.
-    const prior = session ? await sessions.history(session) : []
-    const spoken = await answer(runtime, { question, prior, session: session || undefined })
+    const stored = session ? await sessions.context(session) : { messages: [], shown: [], base: 0 }
+    const spoken = await answer(runtime, { messages: [...stored.messages, { role: 'user', content: query }], shown: stored.shown, base: stored.base, session: session || undefined })
     const pcm = await runtime.speak(spoken.text, { language })
-    if (session) await sessions.append(session, { kind: 'voice', question, answer: spoken.text, citations: spoken.citations })
+    if (session) {
+      const shown = spoken.hits.filter((hit) => !hit.reused).map((hit) => hit.id)
+      await sessions.append(session, { kind: 'voice', query, answer: spoken.text, citations: spoken.citations, messages: spoken.messages, shown, base: spoken.base })
+    }
 
     return {
       session: session || null,
-      question,
+      query,
       answer: spoken.text,
       citations: spoken.citations,
       audio: { format: 'wav', sampleRate: SAMPLE_RATE, base64: pcmToWav(pcm, SAMPLE_RATE).toString('base64') },
@@ -77,19 +80,21 @@ export const registerMedia = (app, runtime, sessions) => {
   app.post(`${api}/images/ask`, async (request, reply) => {
     const part = await upload(request, reply)
     if (!part) return reply
-    const question = field(part, 'question', 'Describe this image in one sentence.')
+    const query = field(part, 'query', 'Describe this image in one sentence.')
     const session = field(part, 'session', '')
     // A small preview the chat page made, so an earlier chat can show the photo again.
     const thumb = field(part, 'thumb', '')
     // Qwen3.5 thinks before it answers; captured separately, the scratchpad stays out of the reply.
-    const text = await withUpload(part, (path) => runtime.look({ prompt: question, imagePath: path, captureThinking: true }))
+    const text = await withUpload(part, (path) => runtime.look({ prompt: query, imagePath: path, captureThinking: true }))
     const answer = String(text).trim()
     if (session) {
+      // The chat model never saw the photo; its history gets the question and answer as plain text.
       await sessions.append(session, {
-        kind: 'image', question, answer, citations: [],
+        kind: 'image', query, answer, citations: [],
+        messages: [{ role: 'user', content: query }, { role: 'assistant', content: answer }], shown: [],
         ...(thumb.startsWith('data:image/') && thumb.length <= 200_000 ? { thumb } : {}),
       })
     }
-    return { session: session || null, question, answer }
+    return { session: session || null, query, answer }
   })
 }

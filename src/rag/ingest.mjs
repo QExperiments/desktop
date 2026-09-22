@@ -4,12 +4,14 @@ import { loadModel, unloadModel, embed, ragChunk, close } from '@qvac/sdk'
 import {
   config,
   getEmbeddingModelSrc,
+  docTextForEmbedding,
   addChunks,
   buildFtsIndex,
   clearCollection,
   count,
   chunkId,
   contentHash,
+  embeddingRecipe,
   deleteByFile,
   listIndexedHashes,
 } from './store.mjs'
@@ -128,6 +130,27 @@ function jsonToText(value, prefix = '', out = []) {
   return out
 }
 
+// CSV_ROW_CHUNKS: one unit per CSV row (the key=value line of csvToText) and,
+// for JSON, one unit per element of every top-level array plus one unit with
+// the top-level scalars; each unit becomes its own chunk instead of the file
+// being chunked by tokens. Returns null when the file has no row structure.
+function rowUnits(ext, raw) {
+  if (ext === '.csv') return csvToText(raw).split('\n').filter((line) => line.trim())
+  if (ext === '.json') {
+    const value = JSON.parse(raw)
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) return null
+    const scalars = []
+    const units = []
+    for (const [key, val] of Object.entries(value)) {
+      if (Array.isArray(val)) val.forEach((item, i) => units.push(jsonToText(item, `${key}[${i}]`).join(', ')))
+      else if (val !== null && typeof val === 'object') units.push(jsonToText(val, key).join(', '))
+      else scalars.push(`${key}=${val}`)
+    }
+    return [scalars.join('\n'), ...units].filter((u) => u.trim())
+  }
+  return null
+}
+
 // Reads a file and converts it to plain text based on its extension.
 export function parseFile(filePath) {
   const ext = path.extname(filePath).toLowerCase()
@@ -147,9 +170,36 @@ export function parseFile(filePath) {
   }
 }
 
+// The units a file is chunked from when CSV_ROW_CHUNKS is on: rows / records
+// for csv and json, null (chunk the whole text) for everything else.
+export function parseUnits(filePath) {
+  if (!config.rowChunks) return null
+  const ext = path.extname(filePath).toLowerCase()
+  if (ext !== '.csv' && ext !== '.json') return null
+  return rowUnits(ext, fs.readFileSync(filePath, 'utf8'))
+}
+
+// CHUNK_HEADER: the first line of every chunk names the file, its folder and
+// the file's subject (its first non-empty line, markdown marks and a
+// `Subject:` label stripped), so a chunk from the middle of a document still
+// says which document it is from, for both the vector and the BM25 leg.
+export function chunkHeader(rel, type, text) {
+  const first = text.split('\n').map((l) => l.trim()).find((l) => l) || ''
+  const subject = first.replace(/^#+\s*/, '').replace(/^subject:\s*/i, '').slice(0, 120)
+  return `file: ${rel} · type: ${type} · ${subject}`
+}
+
 // Ingests the whole corpus: parses files, chunks and embeds them, skipping files that already match their stored hash.
-export async function ingest({ force = false } = {}) {
+// Returns the counts and the embedding statistics of the run. `closeSdk: false`
+// keeps the SDK worker alive for a caller that goes on to search in-process.
+export async function ingest({ force = false, closeSdk = true } = {}) {
+  const startedAt = Date.now()
+  // embed().stats.totalTokens is cumulative over the model's lifetime, so the
+  // per-call count is the difference; times are wall clock (the SDK's totalTime is not reliable).
+  const stats = { files: 0, chunks: 0, embedded: 0, skipped: 0, embed_tokens: 0, embed_ms: 0, embed_calls: 0, load_ms: null }
+  let seenTokens = 0
   const modelSrc = getEmbeddingModelSrc()
+  const recipe = embeddingRecipe(modelSrc.modelId)
   console.log(`Embedding model: ${modelSrc.local ? 'local file' : 'registry'} (${modelSrc.modelId})`)
 
   if (force) {
@@ -162,6 +212,7 @@ export async function ingest({ force = false } = {}) {
 
   const indexed = await listIndexedHashes()
 
+  const loadStart = Date.now()
   const modelId = await loadModel({
     modelSrc: modelSrc.modelSrc,
     modelType: modelSrc.modelType,
@@ -172,6 +223,7 @@ export async function ingest({ force = false } = {}) {
       if (p.percentage >= 100) process.stderr.write('\n')
     },
   })
+  stats.load_ms = Date.now() - loadStart
 
   try {
     let totalChunks = 0
@@ -192,7 +244,7 @@ export async function ingest({ force = false } = {}) {
         continue
       }
 
-      const hash = contentHash(text)
+      const hash = contentHash(text, recipe)
 
       // Skip files whose content is unchanged; remove and re-add those that changed.
       if (!force && indexed[rel] === hash) {
@@ -204,20 +256,25 @@ export async function ingest({ force = false } = {}) {
         await deleteByFile(rel)
       }
 
-      const chunks = await ragChunk({
-        documents: [text],
-        chunkOpts: config.chunkOpts,
-      })
+      const units = parseUnits(file)
+      const chunks = units
+        ? units.map((content) => ({ content }))
+        : await ragChunk({
+          documents: [text],
+          chunkOpts: config.chunkOpts,
+        })
 
+      const type = docType(file, config.corpusDir)
+      const header = config.chunkHeader ? chunkHeader(rel, type, text) : null
       const ids = []
       const documents = []
       const metadatas = []
       for (let i = 0; i < chunks.length; i++) {
         ids.push(chunkId(rel, i))
-        documents.push(chunks[i].content)
+        documents.push(header ? `${header}\n${chunks[i].content}` : chunks[i].content)
         metadatas.push({
           file: rel,
-          type: docType(file, config.corpusDir),
+          type,
           title: path.basename(file),
           chunk_index: i,
           content_hash: hash,
@@ -226,7 +283,14 @@ export async function ingest({ force = false } = {}) {
       }
 
       if (documents.length > 0) {
-        const { embedding } = await embed({ modelId, text: documents })
+        const t0 = Date.now()
+        const { embedding, stats: embedStats } = await embed({ modelId, text: documents.map((doc) => docTextForEmbedding(doc, path.basename(file))) })
+        stats.embed_ms += Date.now() - t0
+        stats.embed_calls += 1
+        if (Number.isFinite(embedStats?.totalTokens)) {
+          stats.embed_tokens += embedStats.totalTokens >= seenTokens ? embedStats.totalTokens - seenTokens : embedStats.totalTokens
+          seenTokens = embedStats.totalTokens
+        }
         await addChunks({ ids, embeddings: embedding, documents, metadatas })
         embeddedChunks += documents.length
       }
@@ -234,10 +298,20 @@ export async function ingest({ force = false } = {}) {
     }
 
     console.log(`\nDone. ${embeddedChunks} chunks embedded, ${skipped} files already indexed.`)
+    const ftsStart = Date.now()
     await buildFtsIndex()
-    console.log(`Total chunks now in store: ${await count()}`)
+    stats.fts_ms = Date.now() - ftsStart
+    stats.files = files.length
+    stats.chunks = totalChunks
+    stats.embedded = embeddedChunks
+    stats.skipped = skipped
+    stats.in_store = await count()
+    stats.ingest_ms = Date.now() - startedAt
+    stats.embed_tps = stats.embed_ms ? Number((stats.embed_tokens / (stats.embed_ms / 1000)).toFixed(1)) : null
+    console.log(`Total chunks now in store: ${stats.in_store}`)
   } finally {
     await unloadModel({ modelId })
-    await close()
+    if (closeSdk) await close()
   }
+  return stats
 }

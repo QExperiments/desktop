@@ -27,8 +27,14 @@ describe('selectTier', () => {
     assert.equal(selectTier(device({ gib: 32, drivers: { cuda: true }, unifiedMemory: false }), catalog).tier, 'L')
   })
 
-  it('drops a 4 GB machine to the small tier', () => {
-    assert.equal(selectTier(device({ gib: 4 }), catalog).tier, 'S')
+  it('drops a 6 GB machine to the small tier', () => {
+    assert.equal(selectTier(device({ gib: 6 }), catalog).tier, 'S')
+  })
+
+  it('refuses a 4 GB machine with the RAM it would need', () => {
+    const { tier, reason } = selectTier(device({ gib: 4 }), catalog)
+    assert.equal(tier, null)
+    assert.match(reason, /4\.0 GiB RAM is below the 5\.0 GiB/)
   })
 
   it('falls back to CPU when no GPU driver is usable', () => {
@@ -58,6 +64,11 @@ describe('models.json', () => {
         assert.ok(model.bytes > 0)
       }
     }
+  })
+
+  it('gives every chat tier a context size and shares chat weights with vision on S and L', () => {
+    for (const tier of ['S', 'M', 'L']) assert.ok(catalog.roles.chat.models[tier].modelConfig.ctx_size >= 8192, `chat/${tier} has no ctx_size`)
+    for (const tier of ['S', 'L']) assert.equal(catalog.roles.chat.models[tier].file, catalog.roles.vision.models[tier].file)
   })
 
   it('keeps the middle tier inside the 8 GB budget', () => {

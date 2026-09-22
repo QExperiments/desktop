@@ -1,22 +1,54 @@
 import { randomUUID } from 'node:crypto'
 import multipart from '@fastify/multipart'
 import Fastify from 'fastify'
-import { answer } from '../chat/answer.js'
+import { answer, kvCacheKey } from '../chat/answer.js'
 import { config } from '../config.js'
+import { treeRss } from '../system/rss.js'
 import { registerMedia } from './media.js'
-import { createSessions } from './sessions.js'
-import { registerUi } from './ui.js'
+import { createSessions, isSessionId } from './sessions.js'
+import { createTraces } from './trace.js'
 
 const openaiError = (reply, code, message, type) =>
   reply.code(code).send({ error: { message, type, code } })
+
+const headerValue = (value) => (Array.isArray(value) ? value[0] : value)
 
 export const createServer = (runtime) => {
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } })
   const api = config.apiPrefix
   const sessions = createSessions(config.sessionsDir)
+  const traces = createTraces(config.tracesDir)
+
+  // A session's KV-cache file is worth keeping only while the chat is likely
+  // to continue. When a new session starts, the files of every session past
+  // the newest few are deleted; the sessions themselves stay on disk and
+  // replay from their stored messages, paying one prefill, if reopened.
+  const pruneCaches = async () => {
+    const stale = (await sessions.list()).slice(config.cachedSessions)
+    for (const { id } of stale) await runtime.deleteCache(kvCacheKey(id))
+    if (stale.length) app.log.info({ deleted: stale.length, kept: config.cachedSessions }, 'kv-cache pruned')
+  }
+
+  // When the chat model is unloaded after residentIdleMs, the sessions' KV
+  // files go with it: reloaded, the SDK would prefill the whole history on top
+  // of the file it loads and double the context (see runtime unloadIdle). A
+  // fresh file from the stored turns costs one prefill and nothing else.
+  runtime.onIdleUnload?.(async (role) => {
+    if (role !== 'chat') return
+    const ids = (await sessions.list()).map(({ id }) => id)
+    for (const id of ids) await runtime.deleteCache(kvCacheKey(id))
+    app.log.info({ deleted: ids.length }, 'kv-cache dropped with the idle chat model')
+  })
 
   app.register(multipart, { limits: { fileSize: 32 * 1024 * 1024 } })
-  app.register(async (scope) => registerUi(scope, runtime))
+  // The chat page and test console are optional: MERIDIAN_UI=0 leaves them out
+  // at run time, `npm run build -- --no-ui` leaves ui.js (ejs, @fastify/view)
+  // out of the bundle, and such a bundle logs once and serves the API alone.
+  if (config.ui) {
+    app.register(async (scope) => import('./ui.js')
+      .then((ui) => ui.registerUi(scope, runtime))
+      .catch((error) => app.log.warn({ err: error.message }, 'ui not in this build; serving the API only')))
+  }
   app.register(async (scope) => registerMedia(scope, runtime, sessions))
 
   app.get(`${api}/models`, (_request, reply) => {
@@ -29,12 +61,31 @@ export const createServer = (runtime) => {
     }
   })
 
+  // Every role and tier of models.json: what is provisioned, what the QVAC
+  // registry knows (from `npm run models:list -- --refresh`) and which tiers
+  // this machine's RAM affords. Read-only; downloading stays a setup step.
+  app.get(`${api}/models/catalog`, () => runtime.modelCatalog())
+
   app.get('/health', () => runtime.snapshot())
 
   // Earlier chats, for the chat page. Text, voice and image turns all land here.
   app.get(`${api}/sessions`, () => sessions.list())
   app.get(`${api}/sessions/:id`, async (request, reply) =>
     (await sessions.get(request.params.id)) ?? openaiError(reply, 404, `no session ${request.params.id}`, 'not_found'))
+
+  // Forget a chat: its stored turns and its KV-cache file. The chat page's
+  // delete button lands here; so can an IT script that clears a laptop.
+  app.delete(`${api}/sessions/:id`, async (request, reply) => {
+    const { id } = request.params
+    if (!(await sessions.remove(id))) return openaiError(reply, 404, `no session ${id}`, 'not_found')
+    const cache = await runtime.deleteCache(kvCacheKey(id))
+    // The direct engine keeps its own checkpoint per session; it goes too.
+    if (config.retrieval.engine === 'direct') {
+      await runtime.directChat().then((engine) => engine.drop(id)).catch((error) => request.log.warn(error))
+    }
+    request.log.info({ session: id, cache: cache?.success !== false }, 'session deleted')
+    return { id, deleted: true, cache_deleted: cache?.success !== false }
+  })
 
   app.post(`${api}/cancel/:requestId`, async (request, reply) => {
     const entry = await runtime.cancel(request.params.requestId)
@@ -44,21 +95,53 @@ export const createServer = (runtime) => {
 
   app.post(`${api}/chat/completions`, async (request, reply) => {
     const messages = Array.isArray(request.body?.messages) ? request.body.messages : []
-    const question = messages.filter((message) => message?.role === 'user').at(-1)?.content
-    if (typeof question !== 'string' || question.trim() === '') {
+    const lastUser = messages.findLastIndex((message) => message?.role === 'user')
+    const query = messages[lastUser]?.content
+    if (typeof query !== 'string' || query.trim() === '') {
       return openaiError(reply, 400, 'messages must end with a user message carrying text content', 'invalid_request_error')
     }
-    // Earlier turns go to the model as the client sent them; the chat model's
-    // ctx_size (4096 in models.json) is the only bound. A session key (OpenAI's
-    // `user` field or an x-session-id header) lets the SDK keep the KV state
-    // between calls.
-    const lastUser = messages.findLastIndex((message) => message?.role === 'user')
-    const prior = messages.slice(0, lastUser)
-      .filter((message) => (message?.role === 'user' || message?.role === 'assistant') && typeof message.content === 'string')
-    const header = request.headers['x-session-id']
-    const session = typeof request.body?.user === 'string' ? request.body.user : Array.isArray(header) ? header[0] : header
-    const remember = (text, citations) => {
-      if (session) sessions.append(session, { kind: 'text', question, answer: text, citations }).catch((error) => request.log.warn(error))
+    // Only an x-session-id header names a session (see sessions.js for why the
+    // OpenAI `user` field is not read). With a session the stored turns are
+    // the model's history: they hold the messages exactly as the model saw
+    // them, which the KV cache needs to line up, so the client's earlier turns
+    // are ignored and only its last query is used. Without a session the
+    // client's history goes to the model as sent, stateless like Chat
+    // Completions; the chat model's ctx_size is the bound.
+    const session = headerValue(request.headers['x-session-id']) || undefined
+    if (session !== undefined && !isSessionId(session)) {
+      return openaiError(reply, 400, 'x-session-id must be 1 to 64 characters of letters, digits, _ . or -', 'invalid_request_error')
+    }
+    const stored = session ? await sessions.context(session) : null
+    const prior = stored
+      ? stored.messages
+      : messages.slice(0, lastUser).filter((message) => (message?.role === 'user' || message?.role === 'assistant') && typeof message.content === 'string')
+    const shown = stored?.shown ?? []
+    // The base the session's last turn ran with: which of the stored
+    // excerpts the KV state still holds (src/chat/answer.js).
+    const base = stored?.base ?? 0
+
+    const id = `chatcmpl-${randomUUID()}`
+    const created = Math.floor(Date.now() / 1000)
+    const evalRun = headerValue(request.headers['x-eval-run'])
+
+    // After every answer: the session turn, the eval trace when asked for, and
+    // one log line of numbers. The log never carries the query or the answer.
+    const settle = async (result) => {
+      const rss = await treeRss()
+      const stats = { ...result.stats, rss }
+      if (session) {
+        const turn = { kind: 'text', query, answer: result.text, citations: result.citations, messages: result.messages, shown: result.hits.filter((hit) => !hit.reused).map((hit) => hit.id), base: result.base, requestId: id, usage: result.usage, stats }
+        sessions.append(session, turn)
+          .then((saved) => (saved?.turns.length === 1 ? pruneCaches() : null))
+          .catch((error) => request.log.warn(error))
+      }
+      if (evalRun) {
+        const trace = { id, run: evalRun, session: session ?? null, at: new Date().toISOString(), query, text: result.text, citations: result.citations, hits: result.hits, messages: result.messages, rounds: result.rounds, retrieval: result.retrieval, usage: result.usage, stats }
+        await traces.write(evalRun, id, trace).catch((error) => request.log.warn(error))
+      }
+      const { tool_calls, ...numbers } = stats
+      request.log.info({ id, session: session ?? null, usage: result.usage, stats: { ...numbers, tool_calls: tool_calls.map((call) => call.name) } }, 'chat')
+      return stats
     }
 
     const generationParams = {}
@@ -66,22 +149,22 @@ export const createServer = (runtime) => {
     if (typeof request.body?.temperature === 'number') generationParams.temp = request.body.temperature
     if (Number.isInteger(request.body?.seed)) generationParams.seed = request.body.seed
 
-    const id = `chatcmpl-${randomUUID()}`
-    const created = Math.floor(Date.now() / 1000)
+    reply.header('x-request-id', id)
 
     if (request.body?.stream) {
-      // OpenAI SSE: one `chat.completion.chunk` per token, citations and
-      // `grounded` ride on the final chunk, then `[DONE]`.
-      reply.raw.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' })
+      // OpenAI SSE: one `chat.completion.chunk` per token; citations, `grounded`,
+      // `usage` and `stats` ride on the final chunk, then `[DONE]`.
+      reply.raw.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive', 'x-request-id': id })
       const send = (payload) => reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`)
       const chunk = (delta, finish_reason = null, extra = {}) =>
         send({ id, object: 'chat.completion.chunk', created, model: config.chatModel, choices: [{ index: 0, delta, finish_reason }], ...extra })
       try {
         let first = true
-        const { text, citations } = await answer(runtime, {
-          question,
-          prior,
+        const result = await answer(runtime, {
+          messages: [...prior, { role: 'user', content: query }],
           session,
+          shown,
+          base,
           generationParams,
           onDelta: (content) => {
             if (first && content.trim() === '') return // the model's leading blank lines
@@ -90,13 +173,14 @@ export const createServer = (runtime) => {
             chunk({ content })
           },
         })
+        const { text, citations } = result
         // Nothing streamed (the model wrote no prose) but answer() still has text.
         if (first && text) {
           chunk({ role: 'assistant' })
           chunk({ content: text })
         }
-        chunk({ citations }, 'stop', { grounded: citations.length > 0 })
-        remember(text, citations)
+        const stats = await settle(result)
+        chunk({ citations }, 'stop', { grounded: citations.length > 0, usage: result.usage, stats })
       } catch (error) {
         request.log.error(error)
         send({ error: { message: error.message, type: 'server_error' } })
@@ -106,8 +190,9 @@ export const createServer = (runtime) => {
       return reply
     }
 
-    const { text, citations } = await answer(runtime, { question, prior, session, generationParams })
-    remember(text, citations)
+    const result = await answer(runtime, { messages: [...prior, { role: 'user', content: query }], session, shown, base, generationParams })
+    const { text, citations } = result
+    const stats = await settle(result)
 
     return {
       id,
@@ -116,6 +201,8 @@ export const createServer = (runtime) => {
       model: config.chatModel,
       choices: [{ index: 0, message: { role: 'assistant', content: text, citations }, finish_reason: 'stop' }],
       grounded: citations.length > 0,
+      usage: result.usage,
+      stats,
     }
   })
 

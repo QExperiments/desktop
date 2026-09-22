@@ -13,12 +13,16 @@
     "provide": "node src/p2p/provider.js",
     "identity": "node src/p2p/identity.js",
     "models:fetch": "node scripts/models-fetch.js",
+    "models:list": "node scripts/models-list.js",
     "corpus:ingest": "node scripts/corpus-ingest.js",
     "test": "node --test 'test/unit/**/*.test.js'",
     "test:e2e": "node --test --test-timeout=1800000 'test/e2e/**/*.test.js'",
-    "eval": "node scripts/stub.js eval",
+    "eval": "node evals/run.mjs",
     "build": "node scripts/build.js",
-    "build:full": "node scripts/build.js --full"
+    "build:full": "node scripts/build.js --full",
+    "eval:compare": "node evals/compare.mjs",
+    "eval:retrieval-exp": "node evals/retrieval-exp.mjs",
+    "eval:embed-batch": "node evals/embed-batch.mjs"
   },
   "repository": {
     "type": "git",
