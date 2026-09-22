@@ -17,3 +17,6 @@ docs/*.html
 qvac/
 evals/results/
 data/profiles/
+docs/todo*.md
+docs/eval-sim-plan.md
+docs/trace-view.mjs
