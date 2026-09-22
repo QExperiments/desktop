@@ -4,10 +4,13 @@ import { historyConfig, historyText, looksElliptical, queryTexts } from '../../s
 
 const previous = ['What is the standard warranty on the ServoDrive X4?', 'And how long does the extended warranty run?', 'What is the RMA turnaround target?']
 
-test('the defaults join the last three questions, and only for a follow-up', () => {
+test('the defaults join the last two questions, and only for a follow-up', () => {
+  // E2 of the 2026-09-21 grid: two beats three by a point at k=3 (84% against
+  // 83%) and ties at k=5, and the gate is what matters -- joining every
+  // question is worse than joining none.
   const cfg = historyConfig()
-  assert.deepEqual([cfg.turns, cfg.when, cfg.mode], [3, 'elliptical', 'concat'])
-  const joined = 'And how long does the extended warranty run? What is the RMA turnaround target? And P2?'
+  assert.deepEqual([cfg.turns, cfg.when, cfg.mode], [2, 'elliptical', 'concat'])
+  const joined = 'What is the RMA turnaround target? And P2?'
   assert.deepEqual(queryTexts('And P2?', previous, cfg), { vectorTexts: [joined], ftsTexts: [joined], joined })
   // a question that names its own subject searches for itself
   const standalone = 'What is the RMA turnaround target for a ServoDrive X4?'

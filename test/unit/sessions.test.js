@@ -63,7 +63,7 @@ test('ids outside the safe alphabet are ignored, never written', async () => {
   assert.equal(await sessions.append('../etc/passwd', turn('x', 'y')), null)
   assert.equal(await sessions.get('../etc/passwd'), null)
   assert.deepEqual(await sessions.history('nope'), [])
-  assert.deepEqual(await sessions.context('nope'), { messages: [], shown: [], base: 0 })
+  assert.deepEqual(await sessions.context('nope'), { messages: [], shown: [], base: 0, from: 0 })
 })
 
 test('remove forgets a session and reports whether there was one', async () => {

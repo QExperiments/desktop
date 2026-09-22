@@ -4,12 +4,13 @@
 // joined text stands in for the elliptical follow-up ("And P2?") without a
 // rewrite by the chat model. No SDK, no store: pure text.
 //
-// Defaults are variant E3 of the 2026-09-21 grid (evals/exp/history-variants
-// .json): the last three questions, only when the question looks like a
+// Defaults are variant E2 of the 2026-09-21 grid (evals/exp/history-variants
+// .json): the last two questions, only when the question looks like a
 // follow-up. Joining every question instead costs standalone turns 10 points
-// of recall; gated it is +4 at k=3 and k=5. QUERY_HISTORY_TURNS=1 is off.
+// of recall; gated it is +4 at k=3 and k=5. Two beats three by a point at
+// k=3 (84% against 83%) and ties at k=5. QUERY_HISTORY_TURNS=1 is off.
 //
-//   QUERY_HISTORY_TURNS  user messages in the search text, current included (default 3, 1 = off)
+//   QUERY_HISTORY_TURNS  user messages in the search text, current included (default 2, 1 = off)
 //   QUERY_HISTORY_CHARS  budget for the joined text, characters (default 600)
 //   QUERY_HISTORY_MODE   which leg sees the joined text:
 //                        concat  both legs (default)
@@ -20,7 +21,7 @@
 //   QUERY_HISTORY_WHEN   elliptical (default: only when the question looks like a follow-up,
 //                        see looksElliptical) | always | oracle (eval only: the case says so)
 export const historyConfig = () => ({
-  turns: Math.max(1, Number(process.env.QUERY_HISTORY_TURNS || 3)),
+  turns: Math.max(1, Number(process.env.QUERY_HISTORY_TURNS || 2)),
   chars: Math.max(1, Number(process.env.QUERY_HISTORY_CHARS || 600)),
   mode: ['concat', 'vector', 'fts', 'fuse'].includes(process.env.QUERY_HISTORY_MODE) ? process.env.QUERY_HISTORY_MODE : 'concat',
   order: process.env.QUERY_HISTORY_ORDER === 'newest' ? 'newest' : 'oldest',

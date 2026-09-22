@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto'
 import { config } from '../config.js'
 import { search } from '../rag/retrieve.mjs'
+import { config as ragConfig } from '../rag/store.mjs'
 import { queryTexts } from '../rag/query-history.mjs'
 import { summarize } from './stats.js'
-import { createMarkupFilter, parseToolMarkup, stripToolMarkup } from './tool-markup.js'
+import { createMarkupFilter, parseToolMarkup, stripThinking, stripToolMarkup } from './tool-markup.js'
 import { SEARCH_DOCUMENTS, renderToolBlock, searchDocumentsTool, toolCitation, toolSchemas, tools as baseTools } from './tools.js'
 
 // One place where a query becomes an answer. Retrieval, grounding and the
@@ -40,7 +41,7 @@ import { SEARCH_DOCUMENTS, renderToolBlock, searchDocumentsTool, toolCitation, t
 // until the estimated context crosses the budget: that turn drops the cache
 // and replays the conversation clean, one prefill per compaction instead of
 // one per turn. compactionBase() is where the two meet.
-const { mode: MODE, rewrite: REWRITE, fusion: FUSION, layout: LAYOUT, topK: CHAT_TOPK, budget: CTX_BUDGET, engine: ENGINE } = config.retrieval
+const { mode: MODE, rewrite: REWRITE, fusion: FUSION, layout: LAYOUT, topK: CHAT_TOPK, budget: CTX_BUDGET, engine: ENGINE, keepTurns: KEEP_TURNS, keepMessages: KEEP_MESSAGES, dropToolRounds: DROP_TOOL_ROUNDS, agentPrompt: AGENT_PROMPT, toolFirstTurn: TOOL_FIRST_TURN } = config.retrieval
 // The direct engine keeps the excerpts out of the cached state entirely, so it
 // replays every earlier turn bare and never compacts (docs/todo-5.md).
 const DIRECT = ENGINE === 'direct'
@@ -53,7 +54,44 @@ const TOOLS_IN_SYSTEM = config.toolsInSystem
 // model may call has to be in the list, so tool mode adds search_documents.
 const declaredTools = (mode = MODE) => (mode === 'tool' ? [...baseTools, SEARCH_DOCUMENTS] : baseTools)
 
-export const systemPrompt = (mode = MODE, { toolsInSystem = config.toolsInSystem } = {}) => [...(toolsInSystem ? [renderToolBlock(declaredTools(mode)), ''] : []), [
+// The agent-loop prompt (MERIDIAN_AGENT_PROMPT=1): the tool choice is an
+// explicit order rather than a paragraph, and the two failures the runs kept
+// showing get a rule each -- calling a fact missing without having searched
+// for it, and carrying one refusal into the next question.
+// The agent loop leaves the reasoning channel open: Qwen3.5 ignores /no_think
+// here anyway (measured 400-2800 characters of reasoning on the first turn of
+// every session), and the addon drops the block from the KV at end of
+// generation, so it costs generated tokens but never context
+// (`remove_thinking_from_context` defaults to true for the Qwen3 family).
+const AGENT_LINES = [
+  'You are Meridian Components\' internal assistant.',
+  'Answer in the language of the question, in at most three sentences.',
+  '',
+  'Choosing a tool, in this order:',
+  '- how many units, availability, "in stock", lead time -> lookup_stock, never search_documents',
+  '- which documents, files or sources exist -> list_documents',
+  '- any other fact about products, policies, SLAs, prices, warranties, customers, deals or reports -> search_documents',
+  '- only when this conversation already shows the exact fact asked for -> no tool, just answer',
+  '',
+  'When in doubt between answering from memory and searching, search. This never overrides the order above: a question about units, availability or lead time is always lookup_stock.',
+  '',
+  'Rules:',
+  '- A new question asks for a new fact: call search_documents for it unless you can point to the sentence in this conversation that states it.',
+  '- Short follow-ups ("and the June figure?", "what about EMEA?") are new questions too. Expand one into a self-contained query naming the product, customer, policy, metric and period, then search for it.',
+  '- Never say a fact is missing from the documents until you have called search_documents for it at least once in this conversation.',
+  '- Judge every question on its own. An earlier "not in the documents" says nothing about the next question.',
+  '- Call the tool yourself, read its result, then answer in plain text. Never tell the user to call a tool.',
+  '- Repeat a call only with different arguments.',
+  '- Ground every number in an excerpt or a tool result of this conversation. If you do not have it, say so plainly.',
+  '- Skip the search only when you can quote the sentence in this conversation that answers the question. Remembering that you saw it is not enough.',
+  '- An identifier on its own (SD-X4-001, FIN-SAL-2026-Q1-011, OPP-88421, CTR-PIN-2024-019-A2) asks for the document that mentions it: search_documents for it. lookup_stock answers a question about units, not a code.',
+  '- A message that asks nothing -- thanks, an acknowledgement, a goodbye -- gets one short line and no tool.',
+  '- Document excerpts arrive only with the first question; later questions bring none.',
+]
+
+export const systemPrompt = (mode = MODE, { toolsInSystem = config.toolsInSystem, agent = AGENT_PROMPT } = {}) => (agent && mode === 'tool'
+  ? [...(toolsInSystem ? [renderToolBlock(declaredTools(mode)), ''] : []), ...AGENT_LINES].join('\n')
+  : [...(toolsInSystem ? [renderToolBlock(declaredTools(mode)), ''] : []), [
   'You are Meridian Components\' internal assistant.',
   'Answer in the language of the question, in at most three sentences.',
   mode === 'tool'
@@ -64,11 +102,16 @@ export const systemPrompt = (mode = MODE, { toolsInSystem = config.toolsInSystem
     ? 'Tools: search_documents for any fact from the documents not yet shown in this conversation; lookup_stock for stock, availability or lead time; list_documents for the list of corpus files.'
     : 'Tools: lookup_stock for stock, availability or lead time; list_documents for the list of corpus files.',
   'Call a tool, read its result, then answer the user in plain text. Repeat a call only with different arguments. Never tell the user to call a tool; call it yourself.',
+  // With a turn window the conversation the model sees starts mid-way: the
+  // excerpts of the dropped turns are gone and nothing in the text says so.
+  ...(KEEP_TURNS > 0 && mode === 'tool'
+    ? ['This conversation may start part way through: earlier turns and their excerpts are not shown to you. If the fact asked for is not in what you can see here, call search_documents for it instead of recalling it.']
+    : []),
   'If you do not have the answer, say so plainly instead of guessing a number.',
   // Qwen3 and Qwen3.5 read this as "skip the reasoning block". Models that do
   // not recognise it ignore it, and captureThinking catches them instead.
   '/no_think',
-].join(' ')].join('\n')
+].join(' ')].join('\n'))
 export const SYSTEM = systemPrompt()
 
 // The query-rewrite step (MERIDIAN_QUERY_REWRITE=1): the chat model, without a
@@ -118,9 +161,18 @@ export const rawQuery = (content = '') => {
 // budget `base` is the end of the history, so every earlier turn is bare;
 // with one it is the message the last compaction ended at, and everything
 // after it is still in the KV cache exactly as the model saw it.
-export const replayHistory = (prior, layout = LAYOUT, base = layout === 'current' ? prior.length : 0) => (layout === 'current'
-  ? prior.map((message, i) => (message.role === 'user' && i < base ? { ...message, content: rawQuery(message.content) } : message))
-  : prior)
+export const replayHistory = (prior, layout = LAYOUT, base = layout === 'current' ? prior.length : 0, { dropTools = false } = {}) => {
+  if (layout !== 'current') return prior
+  const kept = prior.filter((message, i) => !(dropTools && i < base && isToolRound(message)))
+  const cut = dropTools ? base - prior.slice(0, base).filter(isToolRound).length : base
+  return kept.map((message, i) => (message.role === 'user' && i < cut ? { ...message, content: rawQuery(message.content) } : message))
+}
+
+// A tool round: the assistant message that carries the call, and the result
+// that came back. In tool mode the retrieved documents live in the result, so
+// these are what a compaction has to drop for the context to shrink at all.
+export const isToolRound = (message) =>
+  message.role === 'tool' || (message.role === 'assistant' && String(message.content ?? '').includes('<tool_call>'))
 
 // Tokens, near enough to decide a compaction: the corpus excerpts run about
 // 2.9 characters per token and prose about 4. No tokenizer call on the path
@@ -134,7 +186,10 @@ export const estimateTokens = (messages) =>
 // with room for the excerpts this turn is about to add — they are retrieved
 // after it, since a hit counts as reused only against the context the base
 // leaves in place.
-const EXCERPT_TOKENS = 420
+// Measured at 420 tokens a rendered excerpt when a chunk was 512 tokens, so
+// the reserve follows the chunk: at 384 it is 315. A fixed number here would
+// hold back twice the room the excerpts need and compact twice too early.
+export const EXCERPT_TOKENS = Math.round(420 * (ragConfig.chunkOpts.chunkSize / 512))
 
 // Where the excerpts still in the context begin. Layout all keeps all of
 // them (0). Layout current without a budget keeps this turn's alone
@@ -152,6 +207,64 @@ export const compactionBase = (prior, base = 0, { layout = LAYOUT, budget = CTX_
   return estimateTokens([{ content: system }, ...replayed]) <= room ? kept : prior.length
 }
 
+// Where the replayed conversation begins. Without a turn window it is always
+// the start. With one, the previous start holds until the context it implies
+// crosses the budget, and then everything before the last `keep` exchanges is
+// dropped: the model keeps its recent conversation and loses the rest, and
+// this turn's excerpts are the only ones in front of it. A start different
+// from the one passed in means the cached prefix no longer matches and the
+// caller drops it, exactly as a compaction does.
+export const windowStart = (prior, from = 0, { keep = KEEP_TURNS, budget = CTX_BUDGET, system = SYSTEM, k = CHAT_TOPK } = {}) => {
+  if (keep <= 0) return 0
+  const held = Math.min(Math.max(0, from), prior.length)
+  const kept = replayHistory(prior, 'current', prior.length).slice(held)
+  const room = (budget > 0 ? budget : 0) - k * EXCERPT_TOKENS
+  const questions = prior.reduce((list, message, i) => (message.role === 'user' ? [...list, i] : list), [])
+  if (budget > 0 && estimateTokens([{ content: system }, ...kept]) <= room) return held
+  if (budget <= 0 && questions.length <= keep) return held
+  // An exchange is one question and whatever answered it, which in tool mode
+  // is several messages, so the cut lands on the question that opens the
+  // window rather than a fixed number of messages back.
+  return Math.max(held, questions.length <= keep ? held : questions[questions.length - keep])
+}
+
+// The conversation without its tool rounds: the question and the answer the
+// person saw, not the call the model made or the excerpts that came back.
+// A window keeps recent exchanges, and a tool result is the largest thing in
+// one -- five of them outweigh the budget on their own.
+export const bareHistory = (prior) => prior.filter((message) =>
+  message.role !== 'tool' && !(message.role === 'assistant' && String(message.content ?? '').includes('<tool_call>')))
+
+// The last `keep` messages of a reduced conversation, cut so the replay opens
+// on a question rather than half an exchange. 0 keeps everything. Applied
+// only when a compaction already rewrote the history, so the replay stays
+// append-only in between and the KV cache holds.
+export const tailStart = (reduced, keep = KEEP_MESSAGES) => {
+  if (keep <= 0 || reduced.length <= keep) return 0
+  const from = reduced.length - keep
+  for (let i = from; i < reduced.length; i++) if (reduced[i].role === 'user') return i
+  return from
+}
+
+// What this turn replays and whether it had to compact to get there. `base`
+// is where the excerpts (and, with dropTools, the tool rounds) still stand;
+// `from` is where the replay begins. Both hold until the context they imply
+// crosses the budget, so between compactions the replay only grows at the end
+// and the SDK's cached prefix stays valid. On the turn that crosses, the
+// conversation before this turn is reduced and its tail is cut to
+// `keepMessages`, the caller drops the cache and pays one full prefill.
+export const compactionPlan = (prior, { base = 0, from = 0, layout = LAYOUT, budget = CTX_BUDGET, system = SYSTEM, k = CHAT_TOPK, dropTools = DROP_TOOL_ROUNDS, keep = KEEP_MESSAGES } = {}) => {
+  if (layout !== 'current') return { base: 0, from: 0, compacted: false }
+  if (budget <= 0) return { base: prior.length, from: 0, compacted: false }
+  const held = Math.min(Math.max(0, base), prior.length)
+  const heldFrom = Math.min(Math.max(0, from), prior.length)
+  const room = budget - k * EXCERPT_TOKENS
+  const wouldSend = replayHistory(prior, layout, held, { dropTools }).slice(heldFrom)
+  if (estimateTokens([{ content: system }, ...wouldSend]) <= room) return { base: held, from: heldFrom, compacted: false }
+  const reduced = replayHistory(prior, layout, prior.length, { dropTools })
+  return { base: prior.length, from: tailStart(reduced, keep), compacted: true }
+}
+
 // The chunk ids still in front of the model: those shown at or after `base`.
 // sessions.context() reports them per turn ({ at, ids }); a plain list of ids
 // (a client-supplied history, or a session written before) is taken as shown.
@@ -166,8 +279,13 @@ export const visibleChunks = (shown = [], base = 0) =>
 // (temp 0.8, predict -1): one turn of the multiquery run generated 11853
 // tokens. The window's override is not optional -- a slide during generation
 // invalidates the reasoning compactor's tracked span and fails the request.
-export const roundParams = (asked = {}, { predict = config.chatPredict, discard = config.chatDiscard } = {}) =>
-  ({ temp: 0.2, predict, ...(discard > 0 ? { remove_thinking_from_context: false } : {}), ...asked })
+// `reasoning_budget` caps the reasoning channel: the sampler force-emits
+// </think> once it is spent (index.d.ts:268). It is the reliable switch --
+// /no_think only damps Qwen3.5 (1025 characters against 2215 without it),
+// and one turn of the 2026-09-21 mini-run spent 18386 characters on "Thanks,
+// that is all I needed", hit `predict` and answered with nothing in 43 s.
+export const roundParams = (asked = {}, { predict = config.chatPredict, discard = config.chatDiscard, reasoning = config.chatReasoningBudget } = {}) =>
+  ({ temp: 0.2, predict, ...(reasoning >= 0 ? { reasoning_budget: reasoning } : {}), ...(discard > 0 ? { remove_thinking_from_context: false } : {}), ...asked })
 
 // Cleans the model's rewrite: first line, no quotes or "Query:" prefix. Falls
 // back to the original when the model wrote nothing usable.
@@ -237,7 +355,7 @@ const rewriteQuery = async (runtime, prior, query) => {
 // answer), the chunks shown (automatic and tool-retrieved), the retrieval hits,
 // the retrieval block (mode, fusion, the query searched, the rewrite) and the
 // `base` this turn ran with, which the next turn passes back in.
-export const answer = async (runtime, { messages, session, shown = [], base: storedBase = 0, onDelta, generationParams: asked = {}, ...params }) => {
+export const answer = async (runtime, { messages, session, shown = [], base: storedBase = 0, from: storedFrom = 0, onDelta, generationParams: asked = {}, ...params }) => {
   const startedAt = Date.now()
   const query = messages.at(-1)?.role === 'user' ? messages.at(-1).content : ''
   const earlier = messages.slice(0, messages.at(-1)?.role === 'user' ? -1 : undefined).map(({ role, content }) => ({ role, content }))
@@ -245,8 +363,19 @@ export const answer = async (runtime, { messages, session, shown = [], base: sto
   // will see it: bare questions before the base, excerpts kept from it on.
   // The direct engine keeps no excerpt in the cached state, so its base is
   // always the end of the history: every earlier turn is replayed bare.
-  const base = DIRECT ? earlier.length : compactionBase(earlier, storedBase)
-  const prior = replayHistory(earlier, DIRECT ? 'current' : LAYOUT, base)
+  // A turn window replaces the compaction: nothing earlier keeps its
+  // excerpts, and the conversation itself starts at `from`.
+  const plan = DIRECT
+    ? { base: earlier.length, from: 0, compacted: false }
+    : KEEP_TURNS > 0
+      ? { base: earlier.length, from: windowStart(bareHistory(earlier), storedFrom), compacted: false }
+      : compactionPlan(earlier, { base: storedBase, from: storedFrom })
+  const { base, from } = plan
+  const prior = DIRECT
+    ? replayHistory(earlier, 'current', base)
+    : KEEP_TURNS > 0
+      ? replayHistory(bareHistory(earlier), 'current', bareHistory(earlier).length).slice(from)
+      : replayHistory(earlier, LAYOUT, base, { dropTools: DROP_TOOL_ROUNDS }).slice(from)
   // Chunks still in front of the model; those dropped with their turn are not.
   const seen = new Set(visibleChunks(shown, base))
   const firstTurn = !prior.some((message) => message.role === 'user')
@@ -284,11 +413,13 @@ export const answer = async (runtime, { messages, session, shown = [], base: sto
     }
   }
 
-  // Automatic retrieval: every turn in auto mode, the first turn only in tool
-  // mode. With rewrite on, a turn with history searches for the rewritten query.
+  // Automatic retrieval: every turn in auto mode. In tool mode the model
+  // searches for itself, first turn included, unless MERIDIAN_TOOL_FIRST_TURN
+  // puts the old head start back. With rewrite on, a turn with history
+  // searches for the rewritten query.
   let rewrite = null
   let searchQuery = query
-  const retrieveNow = Boolean(query) && (MODE === 'auto' || firstTurn)
+  const retrieveNow = Boolean(query) && (MODE === 'auto' || (firstTurn && TOOL_FIRST_TURN))
   if (retrieveNow && REWRITE && !firstTurn) {
     rewrite = await rewriteQuery(runtime, prior, query)
     if (rewrite) searchQuery = rewrite.to
@@ -300,12 +431,19 @@ export const answer = async (runtime, { messages, session, shown = [], base: sto
   const rounds = []
   // cache: off (no key, every turn prefilled whole), reused (the prefix the
   // SDK holds still matches) or dropped (this turn compacted and re-primed).
-  const cacheable = !DIRECT && Boolean(session) && (LAYOUT !== 'current' || CTX_BUDGET > 0)
+  // A turn window rewrites the history every turn -- the tool rounds of the
+  // previous turns are dropped from the replay while the KV still holds them
+  // -- and the SDK reuses a cache by message count, so the counts no longer
+  // line up: measured, the cached prefix kept growing to 15553 tokens while
+  // the turn sent 17 and the model answered from a state nobody had built.
+  // The window trades the cache away for a small context.
+  const cacheable = !DIRECT && KEEP_TURNS <= 0 && Boolean(session) && (LAYOUT !== 'current' || CTX_BUDGET > 0)
   // checkpoint: the direct engine's cached state holds the bare conversation
   // and this turn's excerpts live in a key that is thrown away after the turn.
-  const cacheMode = DIRECT ? 'checkpoint' : !cacheable ? 'off' : (base !== storedBase ? 'dropped' : 'reused')
-  const retrieval = { mode: MODE, engine: ENGINE, fusion: FUSION, layout: DIRECT ? 'current' : LAYOUT, k: CHAT_TOPK, budget: CTX_BUDGET, ctx: config.chatCtx || null, discard: config.chatDiscard || null, base, compacted: !DIRECT && base !== storedBase, cache: cacheMode, query: searchQuery, rewrite, history: historyText }
-  const done = (text) => ({ text, citations, messages: turn, hits, rounds, retrieval, base, ...summarize({ startedAt, retrievalMs, rounds, rewrite }) })
+  const trimmed = KEEP_TURNS > 0 ? from !== storedFrom : plan.compacted
+  const cacheMode = DIRECT ? 'checkpoint' : !cacheable ? 'off' : (trimmed ? 'dropped' : 'reused')
+  const retrieval = { mode: MODE, engine: ENGINE, fusion: FUSION, layout: DIRECT ? 'current' : LAYOUT, k: CHAT_TOPK, budget: CTX_BUDGET, ctx: config.chatCtx || null, discard: config.chatDiscard || null, base, from, keep: KEEP_TURNS || null, compacted: !DIRECT && trimmed, cache: cacheMode, query: searchQuery, rewrite, history: historyText }
+  const done = (text) => ({ text, citations, messages: turn, hits, rounds, retrieval, base, from, ...summarize({ startedAt, retrievalMs, rounds, rewrite }) })
 
   // Tools of this request: the shared two plus, in tool mode, a search bound to
   // this turn's hits. Its result carries the fresh excerpts in full and only
@@ -333,7 +471,7 @@ export const answer = async (runtime, { messages, session, shown = [], base: sto
   // A compaction rewrites messages the cached state already holds and the
   // addon can only append to it, so the file goes: this turn re-primes the
   // system prompt and sends the clean history once.
-  if (kvCache && base !== storedBase) await runtime.deleteCache?.(kvCache)
+  if (kvCache && trimmed) await runtime.deleteCache?.(kvCache)
 
   // The direct engine works in deltas: the checkpoint holds everything before
   // this turn, so a round sends only what the previous one appended. Without a
@@ -401,8 +539,12 @@ export const answer = async (runtime, { messages, session, shown = [], base: sto
       // The SDK keeps a declared tool's call out of the delta stream. An
       // undeclared one is plain text to it, so it is filtered here or the
       // markup reaches the person reading the answer.
-      const stream = onDelta && TOOLS_IN_SYSTEM ? createMarkupFilter(onDelta) : null
-      if (onDelta) for await (const event of run.events) if (event.type === 'contentDelta') (stream ? stream.push(event.text) : onDelta(event.text))
+      // Always filtered, not only when the declarations sit in the system
+      // prompt. The SDK keeps a declared tool's call out of the delta stream,
+      // but it stops recognising the reasoning block from the fourth turn of
+      // a cached session and those tags arrive as content (docs/todo-9.md).
+      const stream = onDelta ? createMarkupFilter(onDelta) : null
+      if (onDelta) for await (const event of run.events) if (event.type === 'contentDelta') stream.push(event.text)
       stream?.flush()
       const final = await run.final
       // Undeclared tools mean no parsed calls from the SDK: they are read out
@@ -417,7 +559,7 @@ export const answer = async (runtime, { messages, session, shown = [], base: sto
         // A block the model wrote but the loop is not acting on (the round
         // limit, or markup it emitted next to a real answer) must not reach
         // the user as text, which is what an undeclared tool risks.
-        const text = stripToolMarkup(final.contentText ?? '').trim()
+        const text = stripThinking(stripToolMarkup(final.contentText ?? '')).trim()
         turn.push({ role: 'assistant', content: text })
         // text and citations are the shape req 5.2 of the eval protocol fixes.
         return finish(text)

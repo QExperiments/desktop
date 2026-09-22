@@ -51,3 +51,41 @@ test('an unterminated call block swallows the rest, as the final text strip does
   filter.flush()
   assert.equal(out.join(''), '')
 })
+
+test('a closing think tag with no opener still marks the end of the reasoning', () => {
+  // `remove_thinking_from_context` removes the block from the cached prefix,
+  // so the next turn resumes inside it and the model closes it before writing.
+  // 25 turns of the 2026-09-21 full run looked like this, every one of them
+  // with a reused cache and none of them a first turn.
+  const forced = 'The warranty is **24 months** from ship date. </think>  The warranty is **24 months** from ship date.'
+  assert.equal(stripThinking(forced), 'The warranty is **24 months** from ship date.')
+  // the ordinary shape still works
+  assert.equal(stripThinking('<think>weighing it up</think>The answer.'), 'The answer.')
+  // and text with no reasoning at all is untouched
+  assert.equal(stripThinking('Just the answer.'), 'Just the answer.')
+  assert.equal(stripThinking(''), '')
+})
+
+test('the stream filter drops reasoning blocks and a forced closing tag', () => {
+  const run = (...chunks) => {
+    const out = []
+    const filter = createMarkupFilter((text) => out.push(text))
+    for (const chunk of chunks) filter.push(chunk)
+    filter.flush()
+    return out.join('')
+  }
+  // a whole reasoning block never reaches the reader
+  assert.equal(run('<think>weighing it up</think>The answer.'), 'The answer.')
+  // the forced close has no opener: the stream cannot take back what it sent,
+  // so the tag goes and the text around it stays
+  assert.equal(run('The answer. </think> The answer.'), 'The answer.  The answer.')
+  // a tag split across deltas is not emitted in halves
+  assert.equal(run('The answer. <', '/think', '> Rest.'), 'The answer.  Rest.')
+  assert.equal(run('a<thi', 'nk>hidden</thi', 'nk>b'), 'ab')
+  // tool calls keep working, and the two kinds of block do not confuse it
+  assert.equal(run('before<tool_call>{"name":"x"}</tool_call>after'), 'beforeafter')
+  assert.equal(run('<think>plan</think>text<tool_call>c</tool_call>end'), 'textend')
+  // plain text is untouched and nothing is held back at the end
+  assert.equal(run('Just the answer.'), 'Just the answer.')
+  assert.equal(run('ends with a bare <'), 'ends with a bare <')
+})

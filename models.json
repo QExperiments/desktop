@@ -32,7 +32,7 @@
           "sha256": "0ad885ffd4bb022fc4f0d33a3308fa108ef8613159d3b3a67e23abca056b7a6c",
           "https": "https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/6ab461498e2023f6e3c1baea90a8f0fe38ab64d0/Qwen3.5-0.8B-Q8_0.gguf",
           "modelConfig": {
-            "ctx_size": 8192
+            "ctx_size": 32768
           }
         },
         "M": {
@@ -42,7 +42,7 @@
           "sha256": "aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223",
           "https": "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/f6d5376be1edb4d416d56da11e5397a961aca8ae/Qwen3.5-2B-Q4_K_M.gguf",
           "modelConfig": {
-            "ctx_size": 16384
+            "ctx_size": 32768
           }
         },
         "L": {

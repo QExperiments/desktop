@@ -93,6 +93,18 @@ export const createServer = (runtime) => {
     return { cancelled: true, requestId: entry.requestId, kind: entry.kind, role: entry.role }
   })
 
+  // I.6 -- the SDK profiler's own numbers: what each operation is made of and
+  // what memory and GPU it took. Off unless MERIDIAN_PROFILE is set, and 404
+  // rather than an empty body when it is off, so a reader is never handed
+  // zeros that look like measurements. Nothing here carries a question, an
+  // answer or a document: the export holds operation names, durations and
+  // resource gauges.
+  app.get(`${api}/profile`, async (_request, reply) => {
+    const data = runtime.profile?.snapshot?.() ?? null
+    if (!data) return openaiError(reply, 404, 'profiling is off; start serve with MERIDIAN_PROFILE=summary or verbose', 'not_found')
+    return data
+  })
+
   app.post(`${api}/chat/completions`, async (request, reply) => {
     const messages = Array.isArray(request.body?.messages) ? request.body.messages : []
     const lastUser = messages.findLastIndex((message) => message?.role === 'user')
@@ -119,6 +131,9 @@ export const createServer = (runtime) => {
     // The base the session's last turn ran with: which of the stored
     // excerpts the KV state still holds (src/chat/answer.js).
     const base = stored?.base ?? 0
+    // Where the replayed conversation starts: with a turn window the last
+    // trim dropped everything before it (src/chat/answer.js).
+    const from = stored?.from ?? 0
 
     const id = `chatcmpl-${randomUUID()}`
     const created = Math.floor(Date.now() / 1000)
@@ -130,7 +145,7 @@ export const createServer = (runtime) => {
       const rss = await treeRss()
       const stats = { ...result.stats, rss }
       if (session) {
-        const turn = { kind: 'text', query, answer: result.text, citations: result.citations, messages: result.messages, shown: result.hits.filter((hit) => !hit.reused).map((hit) => hit.id), base: result.base, requestId: id, usage: result.usage, stats }
+        const turn = { kind: 'text', query, answer: result.text, citations: result.citations, messages: result.messages, shown: result.hits.filter((hit) => !hit.reused).map((hit) => hit.id), base: result.base, from: result.from, requestId: id, usage: result.usage, stats }
         sessions.append(session, turn)
           .then((saved) => (saved?.turns.length === 1 ? pruneCaches() : null))
           .catch((error) => request.log.warn(error))
@@ -165,6 +180,7 @@ export const createServer = (runtime) => {
           session,
           shown,
           base,
+          from,
           generationParams,
           onDelta: (content) => {
             if (first && content.trim() === '') return // the model's leading blank lines
@@ -190,7 +206,7 @@ export const createServer = (runtime) => {
       return reply
     }
 
-    const result = await answer(runtime, { messages: [...prior, { role: 'user', content: query }], session, shown, base, generationParams })
+    const result = await answer(runtime, { messages: [...prior, { role: 'user', content: query }], session, shown, base, from, generationParams })
     const { text, citations } = result
     const stats = await settle(result)
 
