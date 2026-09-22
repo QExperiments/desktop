@@ -36,7 +36,10 @@ export const scoreStress = (rows, { ctx, predict = 320 }) => {
     total_p50: percentile(total, 0.5),
     total_p95: percentile(total, 0.95),
     ttft_slope_ms_per_turn: slope(ok.map((row) => [row.turn, row.stats?.ttft_ms]).filter(([, y]) => Number.isFinite(y))),
-    prompt_tokens_by_turn: prompt.map(([turn, tokens]) => ({ turn, tokens })),
+    // The live KV a turn ended with, which ctx_size bounds -- not the sum
+    // of the prompts its rounds sent, which `usage.prompt_tokens` holds and
+    // can be several times larger on a tool loop.
+    context_tokens_by_turn: prompt.map(([turn, tokens]) => ({ turn, tokens })),
     // cached_tokens is the KV cache the first round of the turn started from,
     // i.e. the history reused across turns. Rows before it was recorded fall
     // back to usage's cached_tokens, which sums the rounds of a tool loop and

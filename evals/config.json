@@ -173,11 +173,10 @@
         "MERIDIAN_CONTEXT_BUDGET": "26214",
         "MERIDIAN_CONTEXT_KEEP_MESSAGES": "10",
         "MERIDIAN_DROP_TOOL_ROUNDS": "1",
-        "MERIDIAN_AGENT_PROMPT": "1",
         "MERIDIAN_CHAT_TOPK": "5",
         "MERIDIAN_RETRIEVAL_MODE": "auto"
       },
-      "note": "config 1, the default: the server searches on every turn, at most five fresh chunks after the dedup; search_documents is not declared"
+      "note": "config 1, the default, and now also what src/config.js ships: the server searches on every turn, at most five fresh chunks after the dedup; search_documents is not declared. MERIDIAN_AGENT_PROMPT is left out -- it only reaches systemPrompt when the mode is tool"
     },
     "config-tool": {
       "env": {

@@ -67,14 +67,18 @@ export const config = {
     layout: oneOf(process.env.MERIDIAN_CONTEXT_LAYOUT ?? 'current', ['all', 'current'], 'MERIDIAN_CONTEXT_LAYOUT'),
     // How many retrieved chunks a turn puts in front of the model.
     topK: Math.max(1, Number(process.env.MERIDIAN_CHAT_TOPK ?? 5) || 5),
-    // Context budget in tokens for layout current, 0 (default) for none.
+    // Context budget in tokens for layout current, 0 for none. The default
+    // is 0.8 of the 32768 every tier runs with: the measured configuration of
+    // the 2026-09-21 run, where it held the cache across a conversation
+    // (ratio 0.72-0.88 on the multi-turn categories) and compacted four times
+    // in 410 turns. At 0 the server answers every turn with a full prefill.
     // Rewriting an earlier message invalidates the KV cache: the SDK sends
     // only the unsaved tail and the addon appends whatever it is given, so
     // the old excerpts cannot be taken back out of the cached state. With a
     // budget the excerpts of earlier turns stay in the cached prefix, and the
     // turn that would cross the budget drops the cache and replays the
     // conversation clean — one prefill instead of one per turn.
-    budget: Math.max(0, Number(process.env.MERIDIAN_CONTEXT_BUDGET ?? 0) || 0),
+    budget: Math.max(0, Number(process.env.MERIDIAN_CONTEXT_BUDGET ?? 26214) || 0),
     // sdk: completion() through the SDK, which commits the whole turn --
     // excerpts included -- into the session's KV file. direct: the llama.cpp
     // addon underneath, where `saveCacheToDisk` is decided per call, so the
@@ -92,12 +96,14 @@ export const config = {
     // How many messages of the reduced conversation a compaction leaves, 0
     // for no limit. It applies on top of the budget and only at a compaction,
     // so the replay is append-only in between and the KV cache survives.
-    keepMessages: Math.max(0, Number(process.env.MERIDIAN_CONTEXT_KEEP_MESSAGES ?? 0) || 0),
-    // 1: a compaction also drops the tool rounds of the turns before it --
-    // the call and its result. In tool mode the retrieved documents arrive in
-    // the result, so without this a compaction rewrites nothing and the
-    // context does not shrink (docs/todo-8.md).
-    dropToolRounds: process.env.MERIDIAN_DROP_TOOL_ROUNDS === '1',
+    // Without it a compaction rewrites the excerpts away and still replays
+    // the whole conversation, which is the expensive half of the two.
+    keepMessages: Math.max(0, Number(process.env.MERIDIAN_CONTEXT_KEEP_MESSAGES ?? 10) || 0),
+    // A compaction also drops the tool rounds of the turns before it -- the
+    // call and its result. In tool mode the retrieved documents arrive in the
+    // result, so with MERIDIAN_DROP_TOOL_ROUNDS=0 a compaction rewrites
+    // nothing and the context does not shrink.
+    dropToolRounds: process.env.MERIDIAN_DROP_TOOL_ROUNDS !== '0',
     // 1: the agent-loop system prompt -- an explicit order for choosing a
     // tool, and the rule never to call a fact missing before searching for it.
     agentPrompt: process.env.MERIDIAN_AGENT_PROMPT === '1',
@@ -126,20 +132,28 @@ export const config = {
   // src/chat/tool-markup.js instead of the SDK's own parser (docs/todo-6.md).
   toolsInSystem: process.env.MERIDIAN_TOOLS_IN_SYSTEM === '1',
   chatCtx: Math.max(0, Number(process.env.MERIDIAN_CHAT_CTX ?? 0) || 0),
-  // Generation budget of a chat round. Reasoning is generated first and counts
-  // against it, so the budget has to cover the thinking as well as the answer:
-  // at 4096 two of the 83 turns of the multiquery run are cut, at 1024 eleven.
+  // Generation budget of a chat round, reasoning included. With
+  // chatReasoningBudget in place no honest turn has come near it: across the
+  // 516 turns of the 2026-09-21 and 2026-09-22 runs the longest was 897
+  // tokens and p99 was 701. Everything above 1024 was the sampler repeating a
+  // paragraph until the budget ran out, and at 4096 three such turns in a row
+  // added 12000 tokens to a session and the next one died on `context
+  // overflow at batch prefill step (34377 tokens, max 32768)`.
   // Until 2026-09-21 the SDK path asked for 320 and never got it -- the
   // caller's own (empty) generationParams was spread over the defaults in
   // src/chat/answer.js -- so the addon's own budget ran instead and one turn
   // generated 11853 tokens.
-  chatPredict: Math.max(64, Number(process.env.MERIDIAN_CHAT_PREDICT ?? 4096) || 4096),
+  chatPredict: Math.max(64, Number(process.env.MERIDIAN_CHAT_PREDICT ?? 1024) || 1024),
   directPredict: Math.max(64, Number(process.env.MERIDIAN_DIRECT_PREDICT ?? 4096) || 4096),
   // Cap on the reasoning channel of a chat round (addon `reasoning_budget`):
   // -1 leaves it open, 0 switches it off, a positive number is a token cap the
   // sampler enforces by emitting </think> itself. 512 is enough for the tool
   // choice and short of the runaway that cost one turn 43 s and an empty answer.
   chatReasoningBudget: Number(process.env.MERIDIAN_CHAT_REASONING_BUDGET ?? 512),
+  // Sampler penalty on tokens already generated. 0 leaves it to the addon,
+  // which applies none: 15 turns of the 2026-09-21 run repeated one paragraph
+  // until they hit `predict` -- 4095 tokens, 55 to 84 seconds each.
+  chatRepeatPenalty: Math.max(0, Number(process.env.MERIDIAN_CHAT_REPEAT_PENALTY ?? 1.1) || 0),
   // I.6 -- SDK profiler. '' (the default) leaves it off: `enable` installs
   // hooks on every SDK operation and `verbose` also keeps a ring buffer of
   // 1000 events, neither of which a 2019 laptop should pay for by default.

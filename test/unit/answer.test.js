@@ -96,7 +96,7 @@ test('compactionBase holds the cached base until the context crosses the budget'
 })
 
 test('estimateTokens counts the whole context and visibleChunks forgets the compacted turns', () => {
-  assert.equal(estimateTokens([{ content: 'x'.repeat(320) }, { content: 'y'.repeat(320) }]), 200)
+  assert.equal(estimateTokens([{ content: 'x'.repeat(320) }, { content: 'y'.repeat(320) }]), 267)
   const shown = [{ at: 0, ids: ['a.md::0'] }, { at: 4, ids: ['b.md::0', 'c.md::1'] }]
   assert.deepEqual(visibleChunks(shown, 0), ['a.md::0', 'b.md::0', 'c.md::1'])
   assert.deepEqual(visibleChunks(shown, 4), ['b.md::0', 'c.md::1'])
@@ -110,10 +110,17 @@ test('roundParams keeps our defaults under an empty ask and lets the caller over
   // object, empty when the request set neither temperature nor seed. It used
   // to be spread over the whole completion() call and replaced the defaults,
   // so neither temp nor predict ever reached the addon.
-  const opts = { predict: 4096, discard: 0, reasoning: -1 }
+  const opts = { predict: 4096, discard: 0, reasoning: -1, repeat: 0 }
   assert.deepEqual(roundParams({}, opts), { temp: 0.2, predict: 4096 })
   assert.deepEqual(roundParams(undefined, { ...opts, predict: 320 }), { temp: 0.2, predict: 320 })
   assert.deepEqual(roundParams({ temp: 0, seed: 7 }, opts), { temp: 0, predict: 4096, seed: 7 })
+})
+
+test('roundParams penalises repetition unless the penalty is zero', () => {
+  // Without it the sampler repeats a paragraph until `predict` runs out: 15
+  // turns of the 2026-09-21 run, 4095 tokens and up to 84 s each.
+  assert.equal(roundParams({}, { predict: 4096, discard: 0, reasoning: -1, repeat: 1.1 }).repeat_penalty, 1.1)
+  assert.equal('repeat_penalty' in roundParams({}, { predict: 4096, discard: 0, reasoning: -1, repeat: 0 }), false)
 })
 
 test('roundParams caps the reasoning channel unless the budget is negative', () => {
@@ -141,7 +148,7 @@ test('windowStart holds until the budget is crossed, then keeps the last N excha
   // off unless a window is asked for
   assert.equal(windowStart(turns(20), 0, { ...opts, keep: 0 }), 0)
   // under the budget the start holds, so the cached prefix stays valid
-  assert.equal(windowStart(turns(8), 0, opts), 0)
+  assert.equal(windowStart(turns(7), 0, opts), 0)
   // over it, everything before the last five exchanges goes
   assert.equal(windowStart(turns(10), 0, opts), 10)
   assert.equal(windowStart(turns(12), 0, opts), 14)
@@ -195,7 +202,7 @@ test('compactionPlan holds the replay until the budget is crossed, then compacts
     { role: 'assistant', content: 'a'.repeat(1300) },
   ]
   const history = (n) => Array.from({ length: n }, (_, i) => turn(i + 1)).flat()
-  const opts = { layout: 'current', budget: 12000, keep: 10, dropTools: true, system: 's'.repeat(2000), k: 5 }
+  const opts = { layout: 'current', budget: 16000, keep: 10, dropTools: true, system: 's'.repeat(2000), k: 5 }
   let base = 0
   let from = 0
   const compactedAt = []

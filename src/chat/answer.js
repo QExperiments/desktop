@@ -58,10 +58,10 @@ const declaredTools = (mode = MODE) => (mode === 'tool' ? [...baseTools, SEARCH_
 // explicit order rather than a paragraph, and the two failures the runs kept
 // showing get a rule each -- calling a fact missing without having searched
 // for it, and carrying one refusal into the next question.
-// The agent loop leaves the reasoning channel open: Qwen3.5 ignores /no_think
-// here anyway (measured 400-2800 characters of reasoning on the first turn of
-// every session), and the addon drops the block from the KV at end of
-// generation, so it costs generated tokens but never context
+// Neither prompt asks for /no_think any more. Qwen3.5 only damps on it (854
+// characters of reasoning on the first turn of the 2026-09-21 run, with it in
+// the prompt), `reasoning_budget` is the real cap, and the two together told
+// the model not to open a block the sampler is obliged to close.
 // (`remove_thinking_from_context` defaults to true for the Qwen3 family).
 const AGENT_LINES = [
   'You are Meridian Components\' internal assistant.',
@@ -98,6 +98,12 @@ export const systemPrompt = (mode = MODE, { toolsInSystem = config.toolsInSystem
     ? 'Document excerpts come only with the first user message; later questions bring none. Before answering a later question, call search_documents with a self-contained query that names the product, customer, policy or metric the user means, unless the excerpts already in this conversation state the very fact asked for. Ground your answer in the excerpts and search results of this conversation; do not invent facts beyond them.'
     : 'A user message may open with excerpts from the company documents. Ground your answer in them and in earlier excerpts of this conversation; do not invent facts beyond them.',
   'The documents never hold stock quantities, availability or lead times; call lookup_stock for those.',
+  // The excerpts arrive in front of the question, and the model answers from
+  // them: over three runs of the tools cases it called no tool on five to
+  // eight of eleven, saying "the documents do not contain stock quantities"
+  // instead of asking lookup_stock, and listing its own five excerpts instead
+  // of asking list_documents.
+  'A question about how many units, availability or lead time, or about which documents or files exist, is answered by the tool and not by the excerpts, however related the excerpts look.',
   mode === 'tool'
     ? 'Tools: search_documents for any fact from the documents not yet shown in this conversation; lookup_stock for stock, availability or lead time; list_documents for the list of corpus files.'
     : 'Tools: lookup_stock for stock, availability or lead time; list_documents for the list of corpus files.',
@@ -108,9 +114,6 @@ export const systemPrompt = (mode = MODE, { toolsInSystem = config.toolsInSystem
     ? ['This conversation may start part way through: earlier turns and their excerpts are not shown to you. If the fact asked for is not in what you can see here, call search_documents for it instead of recalling it.']
     : []),
   'If you do not have the answer, say so plainly instead of guessing a number.',
-  // Qwen3 and Qwen3.5 read this as "skip the reasoning block". Models that do
-  // not recognise it ignore it, and captureThinking catches them instead.
-  '/no_think',
 ].join(' ')].join('\n'))
 export const SYSTEM = systemPrompt()
 
@@ -123,7 +126,6 @@ export const REWRITE_SYSTEM = [
   'Replace pronouns and references such as "it", "they", "that customer", "and the extended one" with the product, customer, policy or metric they stand for in the conversation.',
   'Keep the language and the meaning of the question; add nothing that is not asked.',
   'Reply with the query alone: no quotes, no explanation.',
-  '/no_think',
 ].join(' ')
 const REWRITE_TURNS = 3
 const REWRITE_ANSWER_CHARS = 300
@@ -136,7 +138,18 @@ export const kvCacheKey = (session) => `meridian-${String(session).replace(/[^\w
 
 // Every tool result goes back with this line. A small model otherwise reads
 // the result as a cue to call the tool again instead of writing the answer.
-const afterTool = (result) => `${JSON.stringify(result)}\nNow answer the user in plain text from this result.`
+// The last round says so outright: of the 11 turns of the 2026-09-21 run that
+// reached MAX_TOOL_ROUNDS, 10 spent that round on another call and ended with
+// markup and no answer. It rides in the result, so the replay stays
+// append-only and the cache with it.
+const AFTER_TOOL = 'Now answer the user in plain text from this result.'
+const LAST_TOOL = 'No more tool calls are available for this question. Answer the user now, in plain text, from this result and what this conversation already holds.'
+const afterTool = (result, last = false) => `${JSON.stringify(result)}\n${last ? LAST_TOOL : AFTER_TOOL}`
+
+// The answer of a turn whose every round wrote markup and no prose. Never the
+// empty string: that reads as a 200 with nothing in it and then sits in the
+// history as a turn where the assistant said nothing.
+const NO_ANSWER = 'I could not complete that lookup. Please ask again, naming the product, customer or document you mean.'
 
 // The user turn as the model sees it: fresh excerpts first, the question last.
 // Chunks shown earlier in the session are already in the model's context and
@@ -174,10 +187,14 @@ export const replayHistory = (prior, layout = LAYOUT, base = layout === 'current
 export const isToolRound = (message) =>
   message.role === 'tool' || (message.role === 'assistant' && String(message.content ?? '').includes('<tool_call>'))
 
-// Tokens, near enough to decide a compaction: the corpus excerpts run about
-// 2.9 characters per token and prose about 4. No tokenizer call on the path
-// of a turn, and a wrong guess only moves the compaction by one turn.
-const CHARS_PER_TOKEN = 3.2
+// Tokens, near enough to decide a compaction. The SDK exposes no tokenizer
+// for the chat model, so this is calibrated against what the model actually
+// counted: over the 235 first turns of the 2026-09-21 and 2026-09-22 runs the
+// ratio ran 2.36 to 3.27 characters per token, median 2.78. The old 3.2 sat
+// above almost all of it and so under-counted on 234 of the 235 -- by 28% on
+// the turn that then died on `context overflow (34377 tokens, max 32768)`.
+// A compaction decision has to err high, so the constant is the low end.
+const CHARS_PER_TOKEN = 2.4
 export const estimateTokens = (messages) =>
   Math.round(messages.reduce((sum, message) => sum + String(message.content ?? '').length, 0) / CHARS_PER_TOKEN)
 
@@ -281,11 +298,11 @@ export const visibleChunks = (shown = [], base = 0) =>
 // invalidates the reasoning compactor's tracked span and fails the request.
 // `reasoning_budget` caps the reasoning channel: the sampler force-emits
 // </think> once it is spent (index.d.ts:268). It is the reliable switch --
-// /no_think only damps Qwen3.5 (1025 characters against 2215 without it),
-// and one turn of the 2026-09-21 mini-run spent 18386 characters on "Thanks,
-// that is all I needed", hit `predict` and answered with nothing in 43 s.
-export const roundParams = (asked = {}, { predict = config.chatPredict, discard = config.chatDiscard, reasoning = config.chatReasoningBudget } = {}) =>
-  ({ temp: 0.2, predict, ...(reasoning >= 0 ? { reasoning_budget: reasoning } : {}), ...(discard > 0 ? { remove_thinking_from_context: false } : {}), ...asked })
+// /no_think only damps Qwen3.5 and is no longer in either prompt. One turn of
+// the 2026-09-21 mini-run spent 18386 characters on "Thanks, that is all I
+// needed", hit `predict` and answered with nothing in 43 s.
+export const roundParams = (asked = {}, { predict = config.chatPredict, discard = config.chatDiscard, reasoning = config.chatReasoningBudget, repeat = config.chatRepeatPenalty } = {}) =>
+  ({ temp: 0.2, predict, ...(repeat > 0 ? { repeat_penalty: repeat } : {}), ...(reasoning >= 0 ? { reasoning_budget: reasoning } : {}), ...(discard > 0 ? { remove_thinking_from_context: false } : {}), ...asked })
 
 // Cleans the model's rewrite: first line, no quotes or "Query:" prefix. Falls
 // back to the original when the model wrote nothing usable.
@@ -532,6 +549,7 @@ export const answer = async (runtime, { messages, session, shown = [], base: sto
   // error instead of a result. Tools stay declared in every round: without
   // them the model still writes tool-call markup, which then streams as text.
   const tries = {}
+  let lastText = ''
   for (let round = 0; ; round++) {
     const { run, settle } = await nextRound(round)
 
@@ -555,14 +573,16 @@ export const answer = async (runtime, { messages, session, shown = [], base: sto
       // thinkingChars: how much the model reasoned before answering; it costs generated tokens.
       const entry = { stats: final.stats ?? null, toolCalls: [], thinkingChars: (final.thinkingText ?? '').length }
       rounds.push(entry)
+      // A block the model wrote but the loop is not acting on (the round
+      // limit, or markup it emitted next to a real answer) must not reach
+      // the user as text, which is what an undeclared tool risks.
+      const text = stripThinking(stripToolMarkup(final.contentText ?? '')).trim()
+      if (text) lastText = text
       if (calls.length === 0 || round >= MAX_TOOL_ROUNDS) {
-        // A block the model wrote but the loop is not acting on (the round
-        // limit, or markup it emitted next to a real answer) must not reach
-        // the user as text, which is what an undeclared tool risks.
-        const text = stripThinking(stripToolMarkup(final.contentText ?? '')).trim()
-        turn.push({ role: 'assistant', content: text })
+        const answer = text || lastText || NO_ANSWER
+        turn.push({ role: 'assistant', content: answer })
         // text and citations are the shape req 5.2 of the eval protocol fixes.
-        return finish(text)
+        return finish(answer)
       }
 
       const push = (message) => { history.push(message); turn.push(message) }
@@ -577,7 +597,7 @@ export const answer = async (runtime, { messages, session, shown = [], base: sto
           : tries[call.name] > tool.maxTries ? { error: `${call.name} was already called for this question; use its earlier result` }
           : await Promise.resolve().then(() => invoke(call)).catch((error) => ({ error: `${call.name} failed: ${error?.message ?? error}` }))
         entry.toolCalls.push({ name: call.name, args: call.arguments ?? null, ms: Date.now() - t0, ...(result?.error ? { error: String(result.error) } : {}) })
-        push({ role: 'tool', content: afterTool(result) })
+        push({ role: 'tool', content: afterTool(result, round + 1 >= MAX_TOOL_ROUNDS) })
         const cite = toolCitation[call.name]
         if (cite && !citations.some((c) => c.file === cite.file)) citations.push(cite)
       }
