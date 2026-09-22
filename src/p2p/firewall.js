@@ -1,4 +1,4 @@
-// I.1.1 allow/deny list of consumer public keys. Live checklist: docs/p2p-test.md
+// I.1.1 allow/deny list of consumer public keys. Live checklist: docs-final/p2p-test.md
 export const parsePublicKeys = (value) =>
   String(value ?? '')
     .split(/[\s,]+/)

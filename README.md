@@ -21,7 +21,7 @@ Qwen3.5-4B). The runtime provisions weights, picks a tier for the
 machine, loads and unloads models, cancels work in flight, transcribes
 speech, speaks answers back, answers questions about a photograph, and
 can run chat, ASR and TTS on a Meridian provider peer. See
-[docs/decisions.md](docs/decisions.md) for why things are the way they
+[docs-final/decisions.md](docs-final/decisions.md) for why things are the way they
 are.
 
 ## Voice and vision
@@ -95,7 +95,7 @@ this laptop's tier.
 ongoing checks.
 
 How to prove it on two processes (firewall, heartbeat, kill the
-provider, bring it back): [docs/p2p-test.md](docs/p2p-test.md).
+provider, bring it back): [docs-final/p2p-test.md](docs-final/p2p-test.md).
 
 ## Requirements
 
@@ -235,7 +235,7 @@ is where its prompt echo would otherwise appear). `serve` opens no outbound conn
 
 ```bash
 npm run build              # plugin-scoped worker bundle in qvac/, app bundle in dist/
-npm run build:full         # also the full-SDK bundle, and writes docs/bundle-size.md
+npm run build:full         # also the full-SDK bundle, and writes docs-final/bundle-size.md
 npm run build -- --no-ui   # app bundle without the chat page and test console (ejs, @fastify/view)
 ```
 
@@ -250,7 +250,7 @@ npm run test:e2e  # needs MERIDIAN_E2E=1 and a completed models:fetch
 ```
 
 P2P live checks (two processes, real DHT) are not in CI. Walk through
-[docs/p2p-test.md](docs/p2p-test.md).
+[docs-final/p2p-test.md](docs-final/p2p-test.md).
 
 ## Evals
 
@@ -274,7 +274,7 @@ the cases, metrics and the judge: [evals/README.md](evals/README.md).
 | --- | --- |
 | `src/runtime/` | the only consumer code that imports `@qvac/sdk` |
 | `src/p2p/provider.js` | `npm run provide` on the strong box; optional public-key firewall |
-| `docs/p2p-test.md` | how to test firewall, heartbeat, failover |
+| `docs-final/p2p-test.md` | how to test firewall, heartbeat, failover |
 | `src/http/` | OpenAI-compatible surface; talks to the runtime, never the SDK |
 | `views/` | chat page at `GET /`, test console at `GET /ui` |
 | `src/chat/answer.js` | the one seam a question passes through to become an answer |

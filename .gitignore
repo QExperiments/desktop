@@ -13,7 +13,8 @@ AGENTS.override.md
 .env.*
 context/
 data/
-docs/*.html
+docs/
 qvac/
 evals/results/
 data/profiles/
+ai-ml-accelerator/

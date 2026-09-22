@@ -1,6 +1,6 @@
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
-// I.1.2 / I.1.3 heartbeat and swap policy. Live checklist: docs/p2p-test.md
+// I.1.2 / I.1.3 heartbeat and swap policy. Live checklist: docs-final/p2p-test.md
 export const DELEGATED_ROLES = new Set(['chat', 'asr', 'tts'])
 
 export const waitForPeer = async ({
