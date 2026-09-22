@@ -110,10 +110,17 @@ test('roundParams keeps our defaults under an empty ask and lets the caller over
   // object, empty when the request set neither temperature nor seed. It used
   // to be spread over the whole completion() call and replaced the defaults,
   // so neither temp nor predict ever reached the addon.
-  const opts = { predict: 4096, discard: 0, reasoning: -1 }
+  const opts = { predict: 4096, discard: 0, reasoning: -1, repeat: 0 }
   assert.deepEqual(roundParams({}, opts), { temp: 0.2, predict: 4096 })
   assert.deepEqual(roundParams(undefined, { ...opts, predict: 320 }), { temp: 0.2, predict: 320 })
   assert.deepEqual(roundParams({ temp: 0, seed: 7 }, opts), { temp: 0, predict: 4096, seed: 7 })
+})
+
+test('roundParams penalises repetition unless the penalty is zero', () => {
+  // Without it the sampler repeats a paragraph until `predict` runs out: 15
+  // turns of the 2026-09-21 run, 4095 tokens and up to 84 s each.
+  assert.equal(roundParams({}, { predict: 4096, discard: 0, reasoning: -1, repeat: 1.1 }).repeat_penalty, 1.1)
+  assert.equal('repeat_penalty' in roundParams({}, { predict: 4096, discard: 0, reasoning: -1, repeat: 0 }), false)
 })
 
 test('roundParams caps the reasoning channel unless the budget is negative', () => {

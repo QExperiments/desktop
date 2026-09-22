@@ -136,7 +136,18 @@ export const kvCacheKey = (session) => `meridian-${String(session).replace(/[^\w
 
 // Every tool result goes back with this line. A small model otherwise reads
 // the result as a cue to call the tool again instead of writing the answer.
-const afterTool = (result) => `${JSON.stringify(result)}\nNow answer the user in plain text from this result.`
+// The last round says so outright: of the 11 turns of the 2026-09-21 run that
+// reached MAX_TOOL_ROUNDS, 10 spent that round on another call and ended with
+// markup and no answer. It rides in the result, so the replay stays
+// append-only and the cache with it.
+const AFTER_TOOL = 'Now answer the user in plain text from this result.'
+const LAST_TOOL = 'No more tool calls are available for this question. Answer the user now, in plain text, from this result and what this conversation already holds.'
+const afterTool = (result, last = false) => `${JSON.stringify(result)}\n${last ? LAST_TOOL : AFTER_TOOL}`
+
+// The answer of a turn whose every round wrote markup and no prose. Never the
+// empty string: that reads as a 200 with nothing in it and then sits in the
+// history as a turn where the assistant said nothing.
+const NO_ANSWER = 'I could not complete that lookup. Please ask again, naming the product, customer or document you mean.'
 
 // The user turn as the model sees it: fresh excerpts first, the question last.
 // Chunks shown earlier in the session are already in the model's context and
@@ -284,8 +295,8 @@ export const visibleChunks = (shown = [], base = 0) =>
 // /no_think only damps Qwen3.5 (1025 characters against 2215 without it),
 // and one turn of the 2026-09-21 mini-run spent 18386 characters on "Thanks,
 // that is all I needed", hit `predict` and answered with nothing in 43 s.
-export const roundParams = (asked = {}, { predict = config.chatPredict, discard = config.chatDiscard, reasoning = config.chatReasoningBudget } = {}) =>
-  ({ temp: 0.2, predict, ...(reasoning >= 0 ? { reasoning_budget: reasoning } : {}), ...(discard > 0 ? { remove_thinking_from_context: false } : {}), ...asked })
+export const roundParams = (asked = {}, { predict = config.chatPredict, discard = config.chatDiscard, reasoning = config.chatReasoningBudget, repeat = config.chatRepeatPenalty } = {}) =>
+  ({ temp: 0.2, predict, ...(repeat > 0 ? { repeat_penalty: repeat } : {}), ...(reasoning >= 0 ? { reasoning_budget: reasoning } : {}), ...(discard > 0 ? { remove_thinking_from_context: false } : {}), ...asked })
 
 // Cleans the model's rewrite: first line, no quotes or "Query:" prefix. Falls
 // back to the original when the model wrote nothing usable.
@@ -532,6 +543,7 @@ export const answer = async (runtime, { messages, session, shown = [], base: sto
   // error instead of a result. Tools stay declared in every round: without
   // them the model still writes tool-call markup, which then streams as text.
   const tries = {}
+  let lastText = ''
   for (let round = 0; ; round++) {
     const { run, settle } = await nextRound(round)
 
@@ -555,14 +567,16 @@ export const answer = async (runtime, { messages, session, shown = [], base: sto
       // thinkingChars: how much the model reasoned before answering; it costs generated tokens.
       const entry = { stats: final.stats ?? null, toolCalls: [], thinkingChars: (final.thinkingText ?? '').length }
       rounds.push(entry)
+      // A block the model wrote but the loop is not acting on (the round
+      // limit, or markup it emitted next to a real answer) must not reach
+      // the user as text, which is what an undeclared tool risks.
+      const text = stripThinking(stripToolMarkup(final.contentText ?? '')).trim()
+      if (text) lastText = text
       if (calls.length === 0 || round >= MAX_TOOL_ROUNDS) {
-        // A block the model wrote but the loop is not acting on (the round
-        // limit, or markup it emitted next to a real answer) must not reach
-        // the user as text, which is what an undeclared tool risks.
-        const text = stripThinking(stripToolMarkup(final.contentText ?? '')).trim()
-        turn.push({ role: 'assistant', content: text })
+        const answer = text || lastText || NO_ANSWER
+        turn.push({ role: 'assistant', content: answer })
         // text and citations are the shape req 5.2 of the eval protocol fixes.
-        return finish(text)
+        return finish(answer)
       }
 
       const push = (message) => { history.push(message); turn.push(message) }
@@ -577,7 +591,7 @@ export const answer = async (runtime, { messages, session, shown = [], base: sto
           : tries[call.name] > tool.maxTries ? { error: `${call.name} was already called for this question; use its earlier result` }
           : await Promise.resolve().then(() => invoke(call)).catch((error) => ({ error: `${call.name} failed: ${error?.message ?? error}` }))
         entry.toolCalls.push({ name: call.name, args: call.arguments ?? null, ms: Date.now() - t0, ...(result?.error ? { error: String(result.error) } : {}) })
-        push({ role: 'tool', content: afterTool(result) })
+        push({ role: 'tool', content: afterTool(result, round + 1 >= MAX_TOOL_ROUNDS) })
         const cite = toolCitation[call.name]
         if (cite && !citations.some((c) => c.file === cite.file)) citations.push(cite)
       }

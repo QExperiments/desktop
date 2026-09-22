@@ -146,6 +146,10 @@ export const config = {
   // sampler enforces by emitting </think> itself. 512 is enough for the tool
   // choice and short of the runaway that cost one turn 43 s and an empty answer.
   chatReasoningBudget: Number(process.env.MERIDIAN_CHAT_REASONING_BUDGET ?? 512),
+  // Sampler penalty on tokens already generated. 0 leaves it to the addon,
+  // which applies none: 15 turns of the 2026-09-21 run repeated one paragraph
+  // until they hit `predict` -- 4095 tokens, 55 to 84 seconds each.
+  chatRepeatPenalty: Math.max(0, Number(process.env.MERIDIAN_CHAT_REPEAT_PENALTY ?? 1.1) || 0),
   // I.6 -- SDK profiler. '' (the default) leaves it off: `enable` installs
   // hooks on every SDK operation and `verbose` also keeps a ring buffer of
   // 1000 events, neither of which a 2019 laptop should pay for by default.
