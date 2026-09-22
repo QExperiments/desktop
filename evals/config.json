@@ -25,8 +25,8 @@
     "multiquery"
   ],
   "ctx": {
-    "S": 8192,
-    "M": 16384,
+    "S": 32768,
+    "M": 32768,
     "L": 32768
   },
   "predict": 320,
@@ -120,6 +120,76 @@
         "MERIDIAN_CHAT_DISCARD": "2048"
       },
       "note": "discard-all-8k with the declarations in the system prompt: the 439 tokens a turn the evictable block costs should go away"
+    },
+    "tool-window-5": {
+      "env": {
+        "MERIDIAN_RETRIEVAL_MODE": "tool",
+        "MERIDIAN_CONTEXT_KEEP_TURNS": "5",
+        "MERIDIAN_CONTEXT_BUDGET": "8000"
+      },
+      "note": "retrieval runs automatically for the first turn only, later turns call search_documents; the turn that crosses 8k keeps the last five exchanges and drops the rest"
+    },
+    "tool-window-8": {
+      "env": {
+        "MERIDIAN_RETRIEVAL_MODE": "tool",
+        "MERIDIAN_CONTEXT_KEEP_TURNS": "8",
+        "MERIDIAN_CONTEXT_BUDGET": "8000"
+      },
+      "note": "the same with a window of eight exchanges"
+    },
+    "tool-window-5-tight": {
+      "env": {
+        "MERIDIAN_RETRIEVAL_MODE": "tool",
+        "MERIDIAN_CONTEXT_KEEP_TURNS": "5",
+        "MERIDIAN_CONTEXT_BUDGET": "2800"
+      },
+      "note": "tool-window-5 with a budget the bare history actually reaches, so the window fires: without tool rounds a fifteen-turn replay is only about 2400 tokens and 8000 is never crossed"
+    },
+    "agent-loop-12k": {
+      "env": {
+        "MERIDIAN_RETRIEVAL_MODE": "tool",
+        "MERIDIAN_CONTEXT_LAYOUT": "current",
+        "MERIDIAN_CONTEXT_BUDGET": "12000",
+        "MERIDIAN_CONTEXT_KEEP_MESSAGES": "10",
+        "MERIDIAN_DROP_TOOL_ROUNDS": "1",
+        "MERIDIAN_AGENT_PROMPT": "1"
+      },
+      "note": "the agent loop: retrieval through search_documents, history appended and never rewritten between compactions so the KV cache holds, and the turn that crosses 12000 drops the earlier tool rounds and keeps the last ten messages (docs/todo-8.md)"
+    },
+    "agent-loop-20pct": {
+      "env": {
+        "MERIDIAN_RETRIEVAL_MODE": "tool",
+        "MERIDIAN_CONTEXT_LAYOUT": "current",
+        "MERIDIAN_CONTEXT_BUDGET": "3277",
+        "MERIDIAN_CONTEXT_KEEP_MESSAGES": "10",
+        "MERIDIAN_DROP_TOOL_ROUNDS": "1",
+        "MERIDIAN_AGENT_PROMPT": "1"
+      },
+      "note": "the agent loop with the budget at a literal 20% of ctx_size (3277 on M): one tool result is about 2700 tokens, so the threshold is crossed on every turn and the cache never survives one"
+    },
+    "config-auto": {
+      "env": {
+        "MERIDIAN_CONTEXT_LAYOUT": "current",
+        "MERIDIAN_CONTEXT_BUDGET": "26214",
+        "MERIDIAN_CONTEXT_KEEP_MESSAGES": "10",
+        "MERIDIAN_DROP_TOOL_ROUNDS": "1",
+        "MERIDIAN_AGENT_PROMPT": "1",
+        "MERIDIAN_CHAT_TOPK": "5",
+        "MERIDIAN_RETRIEVAL_MODE": "auto"
+      },
+      "note": "config 1, the default: the server searches on every turn, at most five fresh chunks after the dedup; search_documents is not declared"
+    },
+    "config-tool": {
+      "env": {
+        "MERIDIAN_CONTEXT_LAYOUT": "current",
+        "MERIDIAN_CONTEXT_BUDGET": "26214",
+        "MERIDIAN_CONTEXT_KEEP_MESSAGES": "10",
+        "MERIDIAN_DROP_TOOL_ROUNDS": "1",
+        "MERIDIAN_AGENT_PROMPT": "1",
+        "MERIDIAN_CHAT_TOPK": "5",
+        "MERIDIAN_RETRIEVAL_MODE": "tool"
+      },
+      "note": "config 2: the model calls search_documents itself on every turn, the first included; the dedup backfills so five fresh chunks always come back"
     }
   }
 }

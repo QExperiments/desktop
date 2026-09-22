@@ -4,17 +4,24 @@ import { join } from 'node:path'
 // Case files, one JSON object per line. Each category has its own shape (see
 // evals/README.md); this module loads them, checks the fields the runner and
 // the metrics rely on, and expands every case into case × run.
-export const CATEGORIES = ['retrieval', 'single', 'abstain', 'tools', 'memory', 'multiturn', 'multiquery', 'stress']
+export const CATEGORIES = ['retrieval', 'agentsearch', 'single', 'abstain', 'tools', 'agent', 'memory', 'multiturn', 'multiquery', 'stress']
 
 // Categories whose turns go through a live session on the server. `tools`
 // sends its own history without a session, `retrieval` never calls the model.
-export const LIVE = new Set(['single', 'abstain', 'memory', 'multiturn', 'multiquery', 'stress'])
+// `agent` runs through a session like multiquery: the point of the category
+// is what the KV cache does across the turns of one conversation, which a
+// stateless request cannot show. `agentsearch` is retrieval.jsonl's queries
+// put to the agent loop one turn at a time, so the files the retriever
+// returns and the files the agent cites can be read side by side.
+export const LIVE = new Set(['single', 'abstain', 'agent', 'agentsearch', 'memory', 'multiturn', 'multiquery', 'stress'])
 
 const required = {
   retrieval: ['query', 'gold_doc_ids'],
   single: ['query', 'gold_doc_ids', 'reference', 'must'],
   abstain: ['query', 'kind'],
   tools: ['messages', 'tool', 'must'],
+  agent: ['turns'],
+  agentsearch: ['turns', 'gold_doc_ids'],
   memory: ['turns', 'fact_turn', 'recall_turns'],
   multiturn: ['turns'],
   multiquery: ['turns'],
@@ -28,6 +35,14 @@ const check = (category, item, line) => {
   if (category === 'tools') {
     if (!Array.isArray(item.messages) || item.messages.at(-1)?.role !== 'user') problems.push('messages must end with a user message')
     if (item.tool !== null && !['lookup_stock', 'list_documents'].includes(item.tool)) problems.push(`tool ${item.tool}`)
+  }
+  if (category === 'agent') {
+    if (!Array.isArray(item.turns) || !item.turns.length) problems.push('turns must hold at least one turn')
+    for (const [i, turn] of (item.turns ?? []).entries()) {
+      if (typeof turn.query !== 'string' || !turn.query) problems.push(`turn ${i + 1} query`)
+      // null is a turn that must call nothing; undefined means the case does not say.
+      if (turn.tool !== undefined && turn.tool !== null && !['lookup_stock', 'list_documents', 'search_documents'].includes(turn.tool)) problems.push(`turn ${i + 1} tool ${turn.tool}`)
+    }
   }
   if (category === 'abstain' && !['out_of_corpus', 'future', 'near_miss'].includes(item.kind)) problems.push(`kind ${item.kind}`)
   if (category === 'memory') {
@@ -52,7 +67,7 @@ const check = (category, item, line) => {
 // the expectations of that turn attached. Single-turn categories become one turn.
 export const turnsOf = (category, item) => {
   if (category === 'stress') return item.queries.map((query, i) => ({ turn: i + 1, query }))
-  if (category === 'memory' || category === 'multiturn' || category === 'multiquery') return item.turns.map((turn, i) => ({ turn: i + 1, ...turn }))
+  if (['memory', 'multiturn', 'multiquery', 'agent', 'agentsearch'].includes(category)) return item.turns.map((turn, i) => ({ turn: i + 1, ...turn }))
   if (category === 'tools') return [{ turn: 1, query: item.messages.at(-1).content, history: item.messages.slice(0, -1), tool: item.tool, args: item.args ?? null, must: item.must }]
   return [{ turn: 1, ...item }]
 }

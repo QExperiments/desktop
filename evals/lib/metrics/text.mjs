@@ -1,5 +1,5 @@
 // Checks on the answer text alone, or against the excerpts and tool results
-// the model was shown. Definitions follow docs/todo.md, "Метрики кодом".
+// the model was shown. Definitions follow the code-metric list in docs/todo.md.
 
 const toRegExp = (pattern) => (pattern instanceof RegExp ? pattern : new RegExp(pattern, 'i'))
 
@@ -59,8 +59,21 @@ export const citationPrecision = (citations, gold = []) => {
   return files.filter((file) => goldSet.has(file)).length / files.length
 }
 
-const cyrillic = (text) => (text.match(/[Ѐ-ӿ]/g) ?? []).length
-const latin = (text) => (text.match(/[A-Za-z]/g) ?? []).length
+// Gold files among the files the answer cited. The mirror of
+// citationPrecision, and the number that makes an agent turn comparable with
+// a plain retrieval query: the retriever is judged on what it returned, the
+// agent on what it actually used after however many searches it ran.
+export const citationRecall = (citations, gold = []) => {
+  if (!gold.length) return null
+  const files = new Set((citations ?? []).map((c) => c.file))
+  return gold.filter((file) => files.has(file)).length / gold.length
+}
+
+// A failed request has no text at all, and a metric must not be the thing
+// that takes the run down: score it as unknown and let `status`/`error` carry
+// the failure.
+const cyrillic = (text) => (String(text ?? '').match(/[Ѐ-ӿ]/g) ?? []).length
+const latin = (text) => (String(text ?? '').match(/[A-Za-z]/g) ?? []).length
 export const langOf = (text) => (cyrillic(text) > latin(text) ? 'ru' : latin(text) ? 'en' : null)
 
 // The answer is in the language of the query (alphabet heuristic).
@@ -98,6 +111,7 @@ export const scoreText = ({ query, text, citations, gold = [], reference, mustPa
   number_match: numberMatch(text, reference),
   grounded: grounded(text, context),
   citation_precision: citationPrecision(citations, gold),
+  citation_recall: citationRecall(citations, gold),
   lang: langMatch(query, text),
   empty: empty(text),
   leak: leak(text),

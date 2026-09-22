@@ -14,9 +14,9 @@ import { CATEGORIES, LIVE, countTurns, loadCases } from './lib/cases.mjs'
 import { ask } from './lib/client.mjs'
 import { fitContext, judge } from './lib/judge/judge.mjs'
 import { scoreMemory } from './lib/metrics/memory.mjs'
-import { scoreMultiqueryTurn } from './lib/metrics/multiquery.mjs'
+import { scoreRetrievalTurn } from './lib/metrics/retrieval-turn.mjs'
 import { K_LIST, scoreRetrieval } from './lib/metrics/retrieval.mjs'
-import { scoreText } from './lib/metrics/text.mjs'
+import { citationRecall, scoreText } from './lib/metrics/text.mjs'
 import { scoreTools } from './lib/metrics/tools.mjs'
 import { buildReport } from './lib/report/build.mjs'
 import { createSampler } from './lib/sampler.mjs'
@@ -55,10 +55,39 @@ const log = (fields, msg) => console.log(`${new Date().toISOString().slice(11, 1
 const jsonl = (path) => (row) => appendFile(path, `${JSON.stringify(row)}\n`)
 const readJsonl = async (path) => (await readFile(path, 'utf8').catch(() => '')).split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l))
 
+// A stored row already holds the calls the turn made, the chunks it was
+// shown and the tool the case wanted, so routing can be scored again without
+// the traces. That is what carries a changed metric back to finished runs.
+// Retrieval, scored again over a finished run. The rows carry the hits and
+// the gold, so the only thing to rebuild is what had been shown earlier in
+// the session and was still in the context: walk each session in order and
+// clear the set wherever a turn reported a compaction.
+const rescoreRetrieval = (rows) => {
+  const shown = new Map()
+  return rows.map((row) => {
+    if (!LIVE.has(row.category)) return row
+    const key = `${row.category}#${row.id}#${row.run}`
+    if (row.turn === 1 || row.compacted) shown.set(key, new Set())
+    const before = shown.get(key) ?? new Set()
+    const scored = scoreRetrievalTurn({ hits: row.hits ?? [], gold: row.gold ?? [], shownBefore: before })
+    scored.citation_recall = citationRecall(row.citations, row.gold ?? [])
+    for (const hit of row.hits ?? []) before.add(hit.file)
+    shown.set(key, before)
+    return { ...row, ...scored }
+  })
+}
+
+const rescoreTools = (row) => {
+  if (!('expected_tool' in row)) return row
+  const scored = scoreTools({ rounds: [{ toolCalls: row.tool_calls ?? [] }] }, { tool: row.expected_tool, args: row.expected_args ?? null }, { hits: row.hits ?? [] })
+  const { rounds, repeat_calls, limit_hits, tool_errors, tool_ms, ...routing } = scored
+  return { ...row, ...routing }
+}
+
 // --report-only <dir>: recompute metrics.json and the report from stored rows.
 if (flags['report-only']) {
   const dir = resolve(flags['report-only'])
-  const turns = await readJsonl(join(dir, 'turns.jsonl'))
+  const turns = rescoreRetrieval((await readJsonl(join(dir, 'turns.jsonl'))).map(rescoreTools))
   const verdicts = await readJsonl(join(dir, 'verdicts.jsonl'))
   const hardware = await readJsonl(join(dir, 'hardware.jsonl'))
   const header = JSON.parse(await readFile(join(dir, 'header.json'), 'utf8'))
@@ -176,12 +205,15 @@ if (liveJobs.length) {
           ? [...rows.map((r) => `${r.context}\n${r.toolResults}`), `${excerpts}\n${toolResults}`].join('\n')
           : `${excerpts}\n${toolResults}`
         const gold = turn.gold_doc_ids ?? job.case.gold_doc_ids ?? []
-        // multiquery: retrieval scored from the hits the model saw, with the files shown earlier in the session.
+        // Retrieval is scored from the hits the model saw, with the files shown
+        // earlier in the session. Every live category is scored the same way,
+        // so `agent` and `multiquery` recall are the same measurement and the
+        // two retrieval designs can be put side by side.
         if (trace?.retrieval?.compacted) inContext = []
         const shownBefore = new Set(inContext.flatMap((r) => (r.hits ?? []).map((h) => h.file)))
-        const retrieval = category === 'multiquery' ? scoreMultiqueryTurn({ hits, gold, shownBefore }) : {}
+        const retrieval = LIVE.has(category) ? scoreRetrievalTurn({ hits, gold, shownBefore }) : {}
         const text = scoreText({ query: turn.query, text: reply.text, citations: reply.citations, gold, reference: turn.reference ?? job.case.reference, mustPatterns: turn.must ?? [], context })
-        const tools = scoreTools(trace, { tool: turn.tool ?? null, args: turn.args ?? null })
+        const tools = scoreTools(trace, { tool: turn.tool ?? null, args: turn.args ?? null }, { hits })
         const row = {
           category, id: job.case.id, run: job.run, turn: turn.turn, session, query: turn.query, kind: job.case.kind, note: job.case.note, followup: turn.followup === true,
           reference: turn.reference ?? job.case.reference ?? null, gold, expected_tool: turn.tool === undefined ? undefined : (turn.tool ?? null), expected_args: turn.args ?? null,

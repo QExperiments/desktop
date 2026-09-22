@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { kappa } from './judge/judge.mjs'
 import { aggregateMemory, scoreMemory } from './metrics/memory.mjs'
-import { aggregateMultiquery } from './metrics/multiquery.mjs'
+import { aggregateRetrievalTurns } from './metrics/retrieval-turn.mjs'
 import { aggregateMultiturn, scoreMultiturn } from './metrics/multiturn.mjs'
 import { aggregateRetrieval, percentile } from './metrics/retrieval.mjs'
 import { memoryTrend, scoreStress } from './metrics/stress.mjs'
@@ -92,6 +92,7 @@ const textBlock = (rows) => ({
   number_match_mean: mean(rows.map((r) => r.number_match)),
   grounded_rate: rate(rows.map((r) => r.grounded)),
   citation_precision_mean: mean(rows.map((r) => r.citation_precision)),
+  citation_recall_mean: mean(rows.map((r) => r.citation_recall)),
   lang_rate: rate(rows.map((r) => r.lang)),
   empty_rate: rate(rows.map((r) => r.empty)),
   leak_rate: rate(rows.map((r) => r.leak)),
@@ -190,12 +191,56 @@ export const aggregate = async ({ turns, verdicts, hardware, cases, config, labe
       routing: routingPR(rows),
       args_subset_rate: rate(rows.map((r) => r.args_subset_match)),
       wrong_tool_rate: rate(rows.map((r) => r.wrong_tool)),
+      unknown_tool_rate: rate(rows.map((r) => r.unknown_tool)),
       must_rate: rate(rows.map((r) => r.must)),
       rounds_mean: mean(rows.map((r) => r.rounds)),
       repeat_calls: rows.reduce((s, r) => s + (r.repeat_calls ?? 0), 0),
       limit_hits: rows.reduce((s, r) => s + (r.limit_hits ?? 0), 0),
       tool_errors: rows.reduce((s, r) => s + (r.tool_errors ?? 0), 0),
       ...textBlock(rows),
+      latency: latency(rows),
+      stats: toolStats(rows),
+    }
+  }
+
+  // agentsearch: the retrieval queries put to the agent loop one turn at a
+  // time. Scored with the same retrieval block as `retrieval` and
+  // `multiquery`, plus what the loop itself cost: searches a turn, rounds,
+  // and the files the answer ended up citing.
+  if (by.agentsearch) {
+    const rows = by.agentsearch
+    metrics.agentsearch = {
+      n: rows.length,
+      ...aggregateRetrievalTurns(rows),
+      searches_per_turn: mean(rows.map((r) => r.search_calls)),
+      turns_with_search: rate(rows.map((r) => (r.search_calls ?? 0) > 0)),
+      citations_mean: mean(rows.map((r) => (r.citations ?? []).length)),
+      ...textBlock(rows),
+      tokens: tokensBlock(rows),
+      latency: latency(rows),
+      stats: toolStats(rows),
+    }
+  }
+
+  if (by.agent) {
+    const rows = by.agent
+    metrics.agent = {
+      n_sessions: Object.keys(groupBy(rows, (r) => `${r.id}#${r.run}`)).length,
+      // Scored exactly as multiquery is, so recall, precision, MRR and
+      // context_recall of the two retrieval designs are one measurement.
+      ...aggregateRetrievalTurns(rows),
+      // What the experiment is for: the cache across the turns of one
+      // conversation, next to the tool the turn was supposed to pick.
+      by_turn: Object.entries(groupBy(rows, (r) => r.turn))
+        .map(([turn, list]) => ({ turn: Number(turn), n: list.length, prefill: mean(list.map((r) => r.stats?.prefill_tokens)), cached: mean(list.map((r) => r.cached_tokens)), context: mean(list.map((r) => r.context_tokens)), cache_ratio: mean(list.map((r) => r.stats?.cache_ratio)), ttft: mean(list.map((r) => r.stats?.ttft_ms)) }))
+        .sort((a, b) => a.turn - b.turn),
+      routing: routingPR(rows.filter((r) => r.expected_tool !== undefined)),
+      args_subset_rate: rate(rows.map((r) => r.args_subset_match)),
+      wrong_tool_rate: rate(rows.map((r) => r.wrong_tool)),
+      unknown_tool_rate: rate(rows.map((r) => r.unknown_tool)),
+      compactions: rows.filter((r) => r.compacted).length,
+      ...textBlock(rows),
+      tokens: tokensBlock(rows),
       latency: latency(rows),
       stats: toolStats(rows),
     }
@@ -236,7 +281,7 @@ export const aggregate = async ({ turns, verdicts, hardware, cases, config, labe
     const noAnswerVerdicts = rows.filter((r) => r.has_gold === false).map(verdictOf).filter(Boolean)
     metrics.multiquery = {
       n_sessions: Object.keys(groupBy(rows, (r) => `${r.id}#${r.run}`)).length,
-      ...aggregateMultiquery(rows),
+      ...aggregateRetrievalTurns(rows),
       context_tokens_by_turn: Object.entries(groupBy(rows, (r) => r.turn))
         .map(([turn, list]) => ({ turn: Number(turn), n: list.length, context: mean(list.map((r) => r.context_tokens)), cached: mean(list.map((r) => r.cached_tokens)), ttft: mean(list.map((r) => r.stats?.ttft_ms)) }))
         .sort((a, b) => a.turn - b.turn),

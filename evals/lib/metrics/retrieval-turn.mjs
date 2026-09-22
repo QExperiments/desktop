@@ -1,9 +1,11 @@
-// Retrieval of a multi-query session, turn by turn, from the hits the chat
-// actually put in front of the model: trace.hits is search(query, CHAT_TOPK),
-// so k here is what the model saw (3 chunks today), not a chosen depth.
+// Retrieval of one live turn, from the hits the chat actually put in front of
+// the model: `trace.hits` is what the turn retrieved, whether the server
+// searched by itself or the model called search_documents, so k here is what
+// the model saw, not a chosen depth. That is what makes the number the same
+// measurement across categories and across the two retrieval designs.
 // Reused chunks (shown earlier in the session, not repeated in the prompt)
 // are still hits: retrieval found them; the model has them in its context.
-export const scoreMultiqueryTurn = ({ hits = [], gold = [], shownBefore = new Set() }) => {
+export const scoreRetrievalTurn = ({ hits = [], gold = [], shownBefore = new Set() }) => {
   const files = hits.map((hit) => hit.file)
   const goldSet = new Set(gold)
   const empty = { has_gold: goldSet.size > 0, k: files.length, files: [...new Set(files)], gold_ranks: [], recall: null, precision: null, hit: null, mrr: null, evidence_in_context: null, context_recall: null }
@@ -46,10 +48,11 @@ const block = (rows) => ({
   context_recall: mean(rows.map((r) => r.context_recall)),
 })
 
-// Over every scored multiquery turn: the whole set, the follow-up and
+// Over every scored turn of one category: the whole set, the follow-up and
 // standalone splits (does an elliptical query still retrieve?), and the turns
-// whose right answer is a refusal.
-export const aggregateMultiquery = (rows) => {
+// whose right answer is a refusal. Turns without gold carry has_gold false
+// and are counted apart, never as a recall of zero.
+export const aggregateRetrievalTurns = (rows) => {
   const gold = rows.filter((r) => r.has_gold)
   const noAnswer = rows.filter((r) => r.has_gold === false)
   return {
