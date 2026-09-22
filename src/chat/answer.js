@@ -98,6 +98,12 @@ export const systemPrompt = (mode = MODE, { toolsInSystem = config.toolsInSystem
     ? 'Document excerpts come only with the first user message; later questions bring none. Before answering a later question, call search_documents with a self-contained query that names the product, customer, policy or metric the user means, unless the excerpts already in this conversation state the very fact asked for. Ground your answer in the excerpts and search results of this conversation; do not invent facts beyond them.'
     : 'A user message may open with excerpts from the company documents. Ground your answer in them and in earlier excerpts of this conversation; do not invent facts beyond them.',
   'The documents never hold stock quantities, availability or lead times; call lookup_stock for those.',
+  // The excerpts arrive in front of the question, and the model answers from
+  // them: over three runs of the tools cases it called no tool on five to
+  // eight of eleven, saying "the documents do not contain stock quantities"
+  // instead of asking lookup_stock, and listing its own five excerpts instead
+  // of asking list_documents.
+  'A question about how many units, availability or lead time, or about which documents or files exist, is answered by the tool and not by the excerpts, however related the excerpts look.',
   mode === 'tool'
     ? 'Tools: search_documents for any fact from the documents not yet shown in this conversation; lookup_stock for stock, availability or lead time; list_documents for the list of corpus files.'
     : 'Tools: lookup_stock for stock, availability or lead time; list_documents for the list of corpus files.',
