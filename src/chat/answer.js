@@ -556,9 +556,12 @@ export const answer = async (runtime, { messages, session, shown = [], base: sto
   for (let round = 0; ; round++) {
     if (signal?.aborted) throw cancelled()
     const { run, requestId, settle } = await nextRound(round)
-    // An abort cancels the round in flight by its SDK request id.
-    const stop = () => { if (requestId) runtime.cancel?.(requestId) }
+    // An abort cancels the round in flight by its SDK request id. One that
+    // landed while the round waited for the model (a load, the KV cleanup
+    // after it) fires no event any more, and the round ran to the end.
+    const stop = () => { if (requestId) runtime.cancel?.(requestId)?.catch(() => {}) }
     signal?.addEventListener('abort', stop, { once: true })
+    if (signal?.aborted) stop()
 
     try {
       // The SDK keeps a declared tool's call out of the delta stream. An
