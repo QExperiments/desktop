@@ -14,7 +14,11 @@ const openaiError = (reply, code, message, type) =>
 const headerValue = (value) => (Array.isArray(value) ? value[0] : value)
 
 export const createServer = (runtime) => {
-  const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } })
+  // Close drops every connection, not only the idle ones: a browser that had
+  // the chat page open keeps a socket Node does not count as idle, and close()
+  // waited on it for good. Anything still running was cancelled just before
+  // (runtime.drain in index.js).
+  const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' }, forceCloseConnections: true })
   const api = config.apiPrefix
   const sessions = createSessions(config.sessionsDir)
   const traces = createTraces(config.tracesDir)
@@ -39,15 +43,24 @@ export const createServer = (runtime) => {
     if (stale.length) app.log.info({ deleted: stale.length, kept: config.cachedSessions }, 'kv-cache pruned')
   }
 
-  // When the chat model is unloaded after residentIdleMs, the sessions' KV
-  // files go with it: reloaded, the SDK would prefill the whole history on top
-  // of the file it loads and double the context (see runtime unloadIdle). A
-  // fresh file from the stored turns costs one prefill and nothing else.
-  runtime.onIdleUnload?.(async (role) => {
-    if (role !== 'chat') return
+  // Every fresh load of the chat model -- at boot, after the idle unload, on a
+  // failover or a reconnect -- drops the sessions' KV files: loaded again, the
+  // SDK would prefill the whole history on top of a file it no longer knows
+  // the length of and double the context (see runtime freshChat). A fresh
+  // file from the stored turns costs one prefill and nothing else.
+  runtime.onChatLoad?.(async () => {
     const ids = (await sessions.list()).map(({ id }) => id)
     for (const id of ids) await runtime.deleteCache(kvCacheKey(id))
-    app.log.info({ deleted: ids.length }, 'kv-cache dropped with the idle chat model')
+    if (ids.length) app.log.info({ deleted: ids.length }, 'kv-cache dropped for the freshly loaded chat model')
+  })
+
+  // Routes that need a model answer 503 until the runtime is ready: before
+  // that the tier is unknown, and a request would load the wrong model or
+  // fail with a 500. Also true again once a shutdown has started.
+  const modelRoutes = ['/chat/', '/audio/', '/images/'].map((path) => `${api}${path}`)
+  app.addHook('onRequest', async (request, reply) => {
+    if (!modelRoutes.some((prefix) => request.url.startsWith(prefix)) || runtime.snapshot().ready) return
+    return openaiError(reply, 503, 'models are still loading', 'service_unavailable')
   })
 
   app.register(multipart, { limits: { fileSize: 32 * 1024 * 1024 } })
@@ -133,6 +146,16 @@ export const createServer = (runtime) => {
     if (session !== undefined && !isSessionId(session)) {
       return openaiError(reply, 400, 'x-session-id must be 1 to 64 characters of letters, digits, _ . or -', 'invalid_request_error')
     }
+    // Held until the turn is saved; see sessions.lock.
+    const unlock = session ? await sessions.lock(session) : null
+    try {
+      return await runTurn(request, reply, { messages, lastUser, query, session })
+    } finally {
+      unlock?.()
+    }
+  })
+
+  const runTurn = async (request, reply, { messages, lastUser, query, session }) => {
     const stored = session ? await sessions.context(session) : null
     const prior = stored
       ? stored.messages
@@ -156,9 +179,9 @@ export const createServer = (runtime) => {
       const stats = { ...result.stats, rss }
       if (session) {
         const turn = { kind: 'text', query, answer: result.text, citations: result.citations, messages: result.messages, shown: result.hits.filter((hit) => !hit.reused).map((hit) => hit.id), base: result.base, from: result.from, requestId: id, usage: result.usage, stats }
-        sessions.append(session, turn)
-          .then((saved) => (saved?.turns.length === 1 ? pruneCaches() : null))
-          .catch((error) => request.log.warn(error))
+        // Saved before the answer ends, so the next turn reads it back.
+        const saved = await sessions.append(session, turn).catch((error) => request.log.warn(error))
+        if (saved?.turns.length === 1) pruneCaches().catch((error) => request.log.warn(error))
       }
       if (evalRun) {
         const trace = { id, run: evalRun, session: session ?? null, at: new Date().toISOString(), query, text: result.text, citations: result.citations, hits: result.hits, messages: result.messages, rounds: result.rounds, retrieval: result.retrieval, usage: result.usage, stats }
@@ -230,7 +253,7 @@ export const createServer = (runtime) => {
       usage: result.usage,
       stats,
     }
-  })
+  }
 
   return app
 }
