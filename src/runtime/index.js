@@ -13,6 +13,11 @@ import { createProfile } from './profile.js'
 const TIERS = ['L', 'M', 'S']
 const FETCH_HINT = 'run `npm run models:fetch`'
 
+// A weight this machine was never given is the operator's to fix, not a crash:
+// the HTTP layer answers it with 503 and the hint.
+const notProvisioned = (role, tier) =>
+  Object.assign(new Error(`no ${role} model provisioned for tier ${tier} — ${FETCH_HINT}`), { statusCode: 503 })
+
 export const createRuntime = ({ log = logger } = {}) => {
   // Enabled before anything else so the profiler sees the model loads: the
   // SDK records an operation only while it is on (I.6).
@@ -56,7 +61,7 @@ export const createRuntime = ({ log = logger } = {}) => {
   const directChat = async () => {
     if (direct) return direct
     const entry = entryFor(manifest, 'chat', state.tier)
-    if (!entry) throw new Error(`no chat model provisioned for tier ${state.tier} — ${FETCH_HINT}`)
+    if (!entry) throw notProvisioned('chat', state.tier)
     const spec = catalog.roles.chat
     const onGpu = (state.hardware?.backend ?? 'cpu') !== 'cpu'
     direct = createDirectChat({ log })
@@ -133,8 +138,10 @@ export const createRuntime = ({ log = logger } = {}) => {
   const loadWithFallback = async (role) => {
     const candidates = TIERS.slice(TIERS.indexOf(state.tier))
       .map((tier) => entryFor(manifest, role, tier))
-      .filter(Boolean)
-    if (!candidates.length) throw new Error(`no ${role} model provisioned for tier ${state.tier} — ${FETCH_HINT}`)
+      // An entry fetched before models.json moved on (Supertonic 2 once) is not
+      // the model the catalog describes; models:fetch replaces it.
+      .filter((entry) => entry && entry.constant === catalog.roles[role]?.models[entry.tier]?.constant)
+    if (!candidates.length) throw notProvisioned(role, state.tier)
 
     for (const [index, entry] of candidates.entries()) {
       try {

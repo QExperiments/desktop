@@ -19,6 +19,16 @@ export const createServer = (runtime) => {
   const sessions = createSessions(config.sessionsDir)
   const traces = createTraces(config.tracesDir)
 
+  // Every thrown error leaves in the OpenAI shape a stock client and the chat
+  // page read (`error.message`), keeping the status the thrower set: a 503 for
+  // a model this machine was never given, a 4xx from Fastify itself.
+  app.setErrorHandler((error, request, reply) => {
+    const code = error.statusCode >= 400 ? error.statusCode : 500
+    if (code >= 500) request.log.error(error)
+    const type = code === 503 ? 'service_unavailable' : code < 500 ? 'invalid_request_error' : 'server_error'
+    return openaiError(reply, code, error.message, type)
+  })
+
   // A session's KV-cache file is worth keeping only while the chat is likely
   // to continue. When a new session starts, the files of every session past
   // the newest few are deleted; the sessions themselves stay on disk and
