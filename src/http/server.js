@@ -29,7 +29,7 @@ export const createServer = (runtime) => {
   app.setErrorHandler((error, request, reply) => {
     const code = error.statusCode >= 400 ? error.statusCode : 500
     if (code >= 500) request.log.error(error)
-    const type = code === 503 ? 'service_unavailable' : code < 500 ? 'invalid_request_error' : 'server_error'
+    const type = error.cancelled ? 'cancelled' : code === 503 ? 'service_unavailable' : code < 500 ? 'invalid_request_error' : 'server_error'
     return openaiError(reply, code, error.message, type)
   })
 
@@ -72,7 +72,18 @@ export const createServer = (runtime) => {
       .then((ui) => ui.registerUi(scope, runtime))
       .catch((error) => app.log.warn({ err: error.message }, 'ui not in this build; serving the API only')))
   }
-  app.register(async (scope) => registerMedia(scope, runtime, sessions))
+  // Turns in flight by the id the client got in x-request-id. A turn stops,
+  // unsaved, when its client disconnects (a fetch aborted by the Stop button,
+  // a closed tab, a timeout) or when POST /v1/cancel/<id> names it.
+  const inflight = new Map()
+  const track = (id, reply) => {
+    const controller = new AbortController()
+    inflight.set(id, controller)
+    reply.raw.on('close', () => { if (!reply.raw.writableFinished) controller.abort() })
+    return { signal: controller.signal, done: () => inflight.delete(id) }
+  }
+
+  app.register(async (scope) => registerMedia(scope, runtime, sessions, track))
 
   app.get(`${api}/models`, (_request, reply) => {
     const state = runtime.snapshot()
@@ -111,6 +122,12 @@ export const createServer = (runtime) => {
   })
 
   app.post(`${api}/cancel/:requestId`, async (request, reply) => {
+    const turn = inflight.get(request.params.requestId)
+    if (turn) {
+      turn.abort()
+      return { cancelled: true, requestId: request.params.requestId, kind: 'turn' }
+    }
+    // An SDK request id straight from /health: a load, a download, one inference.
     const entry = await runtime.cancel(request.params.requestId)
     if (!entry) return openaiError(reply, 404, `no in-flight request ${request.params.requestId}`, 'not_found')
     return { cancelled: true, requestId: entry.requestId, kind: entry.kind, role: entry.role }
@@ -146,16 +163,19 @@ export const createServer = (runtime) => {
     if (session !== undefined && !isSessionId(session)) {
       return openaiError(reply, 400, 'x-session-id must be 1 to 64 characters of letters, digits, _ . or -', 'invalid_request_error')
     }
+    const id = `chatcmpl-${randomUUID()}`
+    const tracked = track(id, reply)
     // Held until the turn is saved; see sessions.lock.
     const unlock = session ? await sessions.lock(session) : null
     try {
-      return await runTurn(request, reply, { messages, lastUser, query, session })
+      return await runTurn(request, reply, { messages, lastUser, query, session, id, signal: tracked.signal })
     } finally {
       unlock?.()
+      tracked.done()
     }
   })
 
-  const runTurn = async (request, reply, { messages, lastUser, query, session }) => {
+  const runTurn = async (request, reply, { messages, lastUser, query, session, id, signal }) => {
     const stored = session ? await sessions.context(session) : null
     const prior = stored
       ? stored.messages
@@ -168,7 +188,6 @@ export const createServer = (runtime) => {
     // trim dropped everything before it (src/chat/answer.js).
     const from = stored?.from ?? 0
 
-    const id = `chatcmpl-${randomUUID()}`
     const created = Math.floor(Date.now() / 1000)
     const evalRun = headerValue(request.headers['x-eval-run'])
 
@@ -215,6 +234,7 @@ export const createServer = (runtime) => {
           base,
           from,
           generationParams,
+          signal,
           onDelta: (content) => {
             if (first && content.trim() === '') return // the model's leading blank lines
             if (first) chunk({ role: 'assistant' })
@@ -231,15 +251,15 @@ export const createServer = (runtime) => {
         const stats = await settle(result)
         chunk({ citations }, 'stop', { grounded: citations.length > 0, usage: result.usage, stats })
       } catch (error) {
-        request.log.error(error)
-        send({ error: { message: error.message, type: 'server_error' } })
+        if (!error.cancelled) request.log.error(error)
+        send({ error: { message: error.message, type: error.cancelled ? 'cancelled' : 'server_error' } })
       }
       reply.raw.write('data: [DONE]\n\n')
       reply.raw.end()
       return reply
     }
 
-    const result = await answer(runtime, { messages: [...prior, { role: 'user', content: query }], session, shown, base, from, generationParams })
+    const result = await answer(runtime, { messages: [...prior, { role: 'user', content: query }], session, shown, base, from, generationParams, signal })
     const { text, citations } = result
     const stats = await settle(result)
 

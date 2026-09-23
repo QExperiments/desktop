@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pcmToWav } from '../audio/wav.js'
-import { answer } from '../chat/answer.js'
+import { answer, cancelled } from '../chat/answer.js'
 import { config } from '../config.js'
 import { isSessionId } from './sessions.js'
 
@@ -27,7 +27,7 @@ const field = (upload, name, fallback) => upload.fields?.[name]?.value ?? fallba
 const badSession = (reply) =>
   reply.code(400).send({ error: { message: 'session must be 1 to 64 characters of letters, digits, _ . or -', type: 'invalid_request_error' } })
 
-export const registerMedia = (app, runtime, sessions) => {
+export const registerMedia = (app, runtime, sessions, track) => {
   const api = config.apiPrefix
 
   const upload = async (request, reply) => {
@@ -62,25 +62,34 @@ export const registerMedia = (app, runtime, sessions) => {
     const session = field(part, 'session', '')
     // The id names a file on disk and a KV-cache key, so it is checked like x-session-id.
     if (session && !isSessionId(session)) return badSession(reply)
+    // Cancelled like a chat turn: by a disconnect or POST /v1/cancel/<id>.
+    const id = `voice-${randomUUID()}`
+    reply.header('x-request-id', id)
+    const tracked = track(id, reply)
     const query = String(await withUpload(part, (path) => runtime.transcribe(path))).trim()
-    if (!query) return reply.code(400).send({ error: { message: 'no speech recognised in the recording', type: 'invalid_request_error' } })
+    if (!query) { tracked.done(); return reply.code(400).send({ error: { message: 'no speech recognised in the recording', type: 'invalid_request_error' } }) }
     // One turn of the session at a time, as on the chat route (sessions.lock).
     const unlock = session ? await sessions.lock(session) : null
     let spoken
+    let pcm
     try {
       // No client history on this route: earlier turns of the session come
       // from the store, with the compaction's base and window start so the
       // replay lines up with the KV cache the text turns left.
       const stored = session ? await sessions.context(session) : { messages: [], shown: [], base: 0, from: 0 }
-      spoken = await answer(runtime, { messages: [...stored.messages, { role: 'user', content: query }], shown: stored.shown, base: stored.base, from: stored.from, session: session || undefined })
+      spoken = await answer(runtime, { messages: [...stored.messages, { role: 'user', content: query }], shown: stored.shown, base: stored.base, from: stored.from, session: session || undefined, signal: tracked.signal })
+      pcm = await runtime.speak(spoken.text, { language })
+      // Saved only once the answer is ready to hand over: a client that left
+      // while it was spoken never saw it, so the session must not hold it.
+      if (tracked.signal.aborted) throw cancelled()
       if (session) {
         const shown = spoken.hits.filter((hit) => !hit.reused).map((hit) => hit.id)
         await sessions.append(session, { kind: 'voice', query, answer: spoken.text, citations: spoken.citations, messages: spoken.messages, shown, base: spoken.base, from: spoken.from })
       }
     } finally {
       unlock?.()
+      tracked.done()
     }
-    const pcm = await runtime.speak(spoken.text, { language })
 
     return {
       session: session || null,
