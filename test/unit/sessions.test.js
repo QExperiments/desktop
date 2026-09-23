@@ -84,3 +84,25 @@ test('isSessionId accepts the KV-cache alphabet only', () => {
   assert.equal(isSessionId(''), false)
   assert.equal(isSessionId(undefined), false)
 })
+
+test('context queued after a save that was not awaited still reads the saved turn', async () => {
+  const sessions = createSessions(dir)
+  sessions.append('s-race', turn('Q1', 'A1'))
+  const { messages } = await sessions.context('s-race')
+  assert.deepEqual(messages, [{ role: 'user', content: 'Q1' }, { role: 'assistant', content: 'A1' }])
+})
+
+test('lock runs the turns of one session one after another and leaves others alone', async () => {
+  const sessions = createSessions(dir)
+  const order = []
+  const turnOf = async (id, name, ms) => {
+    const unlock = await sessions.lock(id)
+    order.push(`${name}:start`)
+    await new Promise((resolve) => setTimeout(resolve, ms))
+    order.push(`${name}:end`)
+    unlock()
+  }
+  await Promise.all([turnOf('s-lock', 'first', 30), turnOf('s-lock', 'second', 0), turnOf('s-other', 'other', 0)])
+  assert.ok(order.indexOf('second:start') > order.indexOf('first:end'), order.join(' '))
+  assert.ok(order.indexOf('other:end') < order.indexOf('first:end'), order.join(' '))
+})

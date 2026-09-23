@@ -474,8 +474,9 @@
 
       const postFile = async (url, blob, name, extra = {}) => {
         const data = new FormData()
-        data.append('file', blob, name)
+        // Fields before the file: the server reads only the fields that precede it.
         for (const [key, value] of Object.entries(extra)) data.append(key, value)
+        data.append('file', blob, name)
         const response = await fetch(url, { method: 'POST', body: data })
         if (!response.ok) await fail(response)
         return response.json()
