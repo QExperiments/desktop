@@ -1,0 +1,2020 @@
+{
+  "header": {
+    "ts": "2026-09-22T16-03-53-261Z",
+    "tier": "M",
+    "runs": 1,
+    "variant": "config-auto",
+    "serverEnv": {
+      "MERIDIAN_CONTEXT_LAYOUT": "current",
+      "MERIDIAN_CONTEXT_BUDGET": "26214",
+      "MERIDIAN_CONTEXT_KEEP_MESSAGES": "10",
+      "MERIDIAN_DROP_TOOL_ROUNDS": "1",
+      "MERIDIAN_CHAT_TOPK": "5",
+      "MERIDIAN_RETRIEVAL_MODE": "auto"
+    },
+    "config": {
+      "port": 11435,
+      "runs": 3,
+      "sampleMs": 500,
+      "tier": "M",
+      "mode": "live",
+      "requestTimeoutMs": 300000,
+      "models": {
+        "S": null,
+        "M": null,
+        "L": null
+      },
+      "judge": {
+        "backend": "local",
+        "constant": "QWEN3_5_9B_MULTIMODAL_Q4_K_M",
+        "batch": 1,
+        "ctx": 16384,
+        "temp": 0,
+        "predict": 900,
+        "cliModel": "haiku",
+        "cliParallel": 4
+      },
+      "judgeCategories": [
+        "single",
+        "multiquery"
+      ],
+      "ctx": {
+        "S": 32768,
+        "M": 32768,
+        "L": 32768
+      },
+      "predict": 320,
+      "variants": {
+        "baseline": {
+          "env": {},
+          "note": "the defaults: layout current, 5 chunks a turn, the last three questions in the search text of a follow-up"
+        },
+        "tool-retrieval": {
+          "env": {
+            "MERIDIAN_RETRIEVAL_MODE": "tool"
+          },
+          "note": "search before the first turn only; later turns call search_documents"
+        },
+        "rewrite": {
+          "env": {
+            "MERIDIAN_QUERY_REWRITE": "1"
+          },
+          "note": "turns with history search for a model-rewritten standalone query"
+        },
+        "cosine": {
+          "env": {
+            "MERIDIAN_FUSION": "cosine"
+          },
+          "note": "vector ranking alone, no BM25 leg"
+        },
+        "bm25": {
+          "env": {
+            "MERIDIAN_FUSION": "bm25"
+          },
+          "note": "full-text ranking alone, no vector leg"
+        },
+        "context-all-k5": {
+          "env": {
+            "MERIDIAN_CONTEXT_LAYOUT": "all"
+          },
+          "note": "excerpts accumulate as before (KV reused end to end) with today's k and search text: the layout control"
+        },
+        "shipped-0920": {
+          "env": {
+            "MERIDIAN_CONTEXT_LAYOUT": "all",
+            "MERIDIAN_CHAT_TOPK": "3",
+            "QUERY_HISTORY_TURNS": "1"
+          },
+          "note": "what serve did before 2026-09-21: excerpts of every turn stay in the context, 3 chunks a turn, the question alone as the search text"
+        },
+        "budget-8k": {
+          "env": {
+            "MERIDIAN_CONTEXT_BUDGET": "8000"
+          },
+          "note": "layout current with a context budget: the excerpts stay in the cached prefix until the context crosses 8k, then one clean prefill"
+        },
+        "budget-5k": {
+          "env": {
+            "MERIDIAN_CONTEXT_BUDGET": "5000"
+          },
+          "note": "as budget-8k, compacting twice as often"
+        },
+        "direct-k5": {
+          "env": {
+            "MERIDIAN_CHAT_ENGINE": "direct"
+          },
+          "note": "the direct addon engine: the cached state holds the bare conversation, this turn's excerpts live in a throwaway key (docs/todo-5.md)"
+        },
+        "discard-all-8k": {
+          "env": {
+            "MERIDIAN_CONTEXT_LAYOUT": "all",
+            "MERIDIAN_CHAT_CTX": "8192",
+            "MERIDIAN_CHAT_DISCARD": "2048"
+          },
+          "note": "the same on half the context, so the window fires from the fourth or fifth turn of a session instead of only on the longest ones"
+        },
+        "all-8k-nodiscard": {
+          "env": {
+            "MERIDIAN_CONTEXT_LAYOUT": "all",
+            "MERIDIAN_CHAT_CTX": "8192"
+          },
+          "note": "the control for discard-all-8k: same layout and context, window off, so the turn that crosses 8192 throws context overflow and takes the session's KV state with it"
+        },
+        "tools-in-system": {
+          "env": {
+            "MERIDIAN_TOOLS_IN_SYSTEM": "1"
+          },
+          "note": "the tool declarations are written into the system prompt, which the prime protects, instead of being handed to the SDK; calls are read out of the model's text (docs/todo-6.md)"
+        },
+        "tools-in-system-discard": {
+          "env": {
+            "MERIDIAN_TOOLS_IN_SYSTEM": "1",
+            "MERIDIAN_CONTEXT_LAYOUT": "all",
+            "MERIDIAN_CHAT_CTX": "8192",
+            "MERIDIAN_CHAT_DISCARD": "2048"
+          },
+          "note": "discard-all-8k with the declarations in the system prompt: the 439 tokens a turn the evictable block costs should go away"
+        },
+        "tool-window-5": {
+          "env": {
+            "MERIDIAN_RETRIEVAL_MODE": "tool",
+            "MERIDIAN_CONTEXT_KEEP_TURNS": "5",
+            "MERIDIAN_CONTEXT_BUDGET": "8000"
+          },
+          "note": "retrieval runs automatically for the first turn only, later turns call search_documents; the turn that crosses 8k keeps the last five exchanges and drops the rest"
+        },
+        "tool-window-8": {
+          "env": {
+            "MERIDIAN_RETRIEVAL_MODE": "tool",
+            "MERIDIAN_CONTEXT_KEEP_TURNS": "8",
+            "MERIDIAN_CONTEXT_BUDGET": "8000"
+          },
+          "note": "the same with a window of eight exchanges"
+        },
+        "tool-window-5-tight": {
+          "env": {
+            "MERIDIAN_RETRIEVAL_MODE": "tool",
+            "MERIDIAN_CONTEXT_KEEP_TURNS": "5",
+            "MERIDIAN_CONTEXT_BUDGET": "2800"
+          },
+          "note": "tool-window-5 with a budget the bare history actually reaches, so the window fires: without tool rounds a fifteen-turn replay is only about 2400 tokens and 8000 is never crossed"
+        },
+        "agent-loop-12k": {
+          "env": {
+            "MERIDIAN_RETRIEVAL_MODE": "tool",
+            "MERIDIAN_CONTEXT_LAYOUT": "current",
+            "MERIDIAN_CONTEXT_BUDGET": "12000",
+            "MERIDIAN_CONTEXT_KEEP_MESSAGES": "10",
+            "MERIDIAN_DROP_TOOL_ROUNDS": "1",
+            "MERIDIAN_AGENT_PROMPT": "1"
+          },
+          "note": "the agent loop: retrieval through search_documents, history appended and never rewritten between compactions so the KV cache holds, and the turn that crosses 12000 drops the earlier tool rounds and keeps the last ten messages (docs/todo-8.md)"
+        },
+        "agent-loop-20pct": {
+          "env": {
+            "MERIDIAN_RETRIEVAL_MODE": "tool",
+            "MERIDIAN_CONTEXT_LAYOUT": "current",
+            "MERIDIAN_CONTEXT_BUDGET": "3277",
+            "MERIDIAN_CONTEXT_KEEP_MESSAGES": "10",
+            "MERIDIAN_DROP_TOOL_ROUNDS": "1",
+            "MERIDIAN_AGENT_PROMPT": "1"
+          },
+          "note": "the agent loop with the budget at a literal 20% of ctx_size (3277 on M): one tool result is about 2700 tokens, so the threshold is crossed on every turn and the cache never survives one"
+        },
+        "config-auto": {
+          "env": {
+            "MERIDIAN_CONTEXT_LAYOUT": "current",
+            "MERIDIAN_CONTEXT_BUDGET": "26214",
+            "MERIDIAN_CONTEXT_KEEP_MESSAGES": "10",
+            "MERIDIAN_DROP_TOOL_ROUNDS": "1",
+            "MERIDIAN_CHAT_TOPK": "5",
+            "MERIDIAN_RETRIEVAL_MODE": "auto"
+          },
+          "note": "config 1, the default, and now also what src/config.js ships: the server searches on every turn, at most five fresh chunks after the dedup; search_documents is not declared. MERIDIAN_AGENT_PROMPT is left out -- it only reaches systemPrompt when the mode is tool"
+        },
+        "config-tool": {
+          "env": {
+            "MERIDIAN_CONTEXT_LAYOUT": "current",
+            "MERIDIAN_CONTEXT_BUDGET": "26214",
+            "MERIDIAN_CONTEXT_KEEP_MESSAGES": "10",
+            "MERIDIAN_DROP_TOOL_ROUNDS": "1",
+            "MERIDIAN_AGENT_PROMPT": "1",
+            "MERIDIAN_CHAT_TOPK": "5",
+            "MERIDIAN_RETRIEVAL_MODE": "tool"
+          },
+          "note": "config 2: the model calls search_documents itself on every turn, the first included; the dedup backfills so five fresh chunks always come back"
+        }
+      }
+    },
+    "judge": null,
+    "judgeBackend": "local",
+    "coldStartMs": 3570,
+    "hardware": {
+      "totalBytes": 25769803776,
+      "cpu": "Apple M4 Pro",
+      "gpu": "Apple M4 Pro",
+      "backend": "metal",
+      "dedicatedGpu": false
+    },
+    "chatModel": "QWEN3_5_2B_MULTIMODAL_Q4_K_M",
+    "embedModel": "EMBEDDINGGEMMA_300M_Q8_0",
+    "servedTier": "M"
+  },
+  "latency": {
+    "n": 410,
+    "errors": 0,
+    "ttft_p50": 1382.1,
+    "ttft_p95": 1876.2,
+    "ttft_client_p50": 3438,
+    "tps_p50": 97.9,
+    "total_p50": 4367,
+    "total_p95": 10344,
+    "prefill_tps_p50": 1282,
+    "cache_ratio_mean": 0.475,
+    "prompt_tokens_mean": 5973.724,
+    "completion_tokens_mean": 264.968,
+    "thinking_chars_mean": 601.485
+  },
+  "retrieval": {
+    "n": 133,
+    "ks": [
+      1,
+      3,
+      4,
+      5,
+      7,
+      10
+    ],
+    "at": {
+      "1": {
+        "recall": 0.5607769423558899,
+        "precision": 0.8721804511278195,
+        "hit": 0.8721804511278195
+      },
+      "3": {
+        "recall": 0.8853383458646615,
+        "precision": 0.5764411027568914,
+        "hit": 0.9924812030075187
+      },
+      "4": {
+        "recall": 0.9342105263157895,
+        "precision": 0.4830827067669173,
+        "hit": 0.9924812030075187
+      },
+      "5": {
+        "recall": 0.9611528822055136,
+        "precision": 0.4240601503759406,
+        "hit": 0.9924812030075187
+      },
+      "7": {
+        "recall": 0.981203007518797,
+        "precision": 0.3243823845327611,
+        "hit": 0.9924812030075187
+      },
+      "10": {
+        "recall": 0.9837092731829572,
+        "precision": 0.2541353383458649,
+        "hit": 0.9924812030075187
+      }
+    },
+    "mrr": 0.9561973114604694,
+    "retrieval_ms_p50": 10
+  },
+  "single": {
+    "n": 8,
+    "must_rate": 1,
+    "number_match_mean": 1,
+    "grounded_rate": 1,
+    "citation_precision_mean": 0.51,
+    "citation_recall_mean": 0.813,
+    "lang_rate": 1,
+    "empty_rate": 0,
+    "leak_rate": 0,
+    "abstained_rate": 0,
+    "latency": {
+      "n": 8,
+      "errors": 0,
+      "ttft_p50": 1676.9,
+      "ttft_p95": 1941.9,
+      "ttft_client_p50": 4271,
+      "tps_p50": 92.9,
+      "total_p50": 6209,
+      "total_p95": 8662,
+      "prefill_tps_p50": 1312,
+      "cache_ratio_mean": 0.001,
+      "prompt_tokens_mean": 2223.875,
+      "completion_tokens_mean": 343.5,
+      "thinking_chars_mean": 985
+    },
+    "judge": null
+  },
+  "abstain": {
+    "n": 10,
+    "abstained_rate": 0.9,
+    "tool_called_rate": 0.2,
+    "by_kind": {
+      "out_of_corpus": {
+        "n": 4,
+        "abstained_rate": 1
+      },
+      "future": {
+        "n": 3,
+        "abstained_rate": 1
+      },
+      "near_miss": {
+        "n": 3,
+        "abstained_rate": 0.667
+      }
+    },
+    "must_rate": null,
+    "number_match_mean": null,
+    "grounded_rate": 1,
+    "citation_precision_mean": 0,
+    "citation_recall_mean": null,
+    "lang_rate": 1,
+    "empty_rate": 0,
+    "leak_rate": 0,
+    "latency": {
+      "n": 10,
+      "errors": 0,
+      "ttft_p50": 1632.6,
+      "ttft_p95": 1910.7,
+      "ttft_client_p50": 5429,
+      "tps_p50": 91.7,
+      "total_p50": 6589,
+      "total_p95": 14385,
+      "prefill_tps_p50": 1323,
+      "cache_ratio_mean": 0.093,
+      "prompt_tokens_mean": 2711.1,
+      "completion_tokens_mean": 484.5,
+      "thinking_chars_mean": 1567
+    },
+    "judge": null
+  },
+  "abstention": {
+    "tp": 9,
+    "fn": 1,
+    "fp": 0,
+    "precision": 1,
+    "recall": 0.9
+  },
+  "tools": {
+    "n": 11,
+    "routing": {
+      "tp": 4,
+      "wrong": 0,
+      "fp": 0,
+      "fn": 3,
+      "tn": 4,
+      "auto": 0,
+      "precision": 1,
+      "recall": 0.5714285714285714
+    },
+    "args_subset_rate": 0.25,
+    "wrong_tool_rate": 0,
+    "unknown_tool_rate": 0,
+    "must_rate": 0.727,
+    "rounds_mean": 1.364,
+    "repeat_calls": 0,
+    "limit_hits": 0,
+    "tool_errors": 0,
+    "number_match_mean": null,
+    "grounded_rate": 0.818,
+    "citation_precision_mean": 0,
+    "citation_recall_mean": null,
+    "lang_rate": 1,
+    "empty_rate": 0,
+    "leak_rate": 0,
+    "abstained_rate": 0.364,
+    "latency": {
+      "n": 11,
+      "errors": 0,
+      "ttft_p50": 1758.9,
+      "ttft_p95": 2143.3,
+      "ttft_client_p50": 5127,
+      "tps_p50": 94.7,
+      "total_p50": 7729,
+      "total_p95": 11237,
+      "prefill_tps_p50": 1319,
+      "cache_ratio_mean": 0,
+      "prompt_tokens_mean": 3389.636,
+      "completion_tokens_mean": 452.455,
+      "thinking_chars_mean": 1316.364
+    },
+    "stats": {
+      "turns": 11,
+      "calls": 4,
+      "calls_per_turn": 0.36,
+      "turns_with_tool": 0.36363636363636365,
+      "per_tool": {
+        "lookup_stock": 3,
+        "list_documents": 1
+      },
+      "rounds_mean": 1.36,
+      "repeat_calls": 0,
+      "limit_hits": 0,
+      "tool_errors": 0,
+      "tool_ms_total": 6
+    }
+  },
+  "agentsearch": {
+    "n": 133,
+    "n_turns": 133,
+    "k": 5,
+    "all": {
+      "n": 133,
+      "recall": 0.9611528822055136,
+      "precision": 0.4240601503759406,
+      "hit": 0.9924812030075187,
+      "mrr": 0.9649122807017543,
+      "evidence_in_context": 0.9924812030075187,
+      "context_recall": 0.9611528822055136
+    },
+    "followup": {
+      "n": 0,
+      "recall": null,
+      "precision": null,
+      "hit": null,
+      "mrr": null,
+      "evidence_in_context": null,
+      "context_recall": null
+    },
+    "standalone": {
+      "n": 133,
+      "recall": 0.9611528822055136,
+      "precision": 0.4240601503759406,
+      "hit": 0.9924812030075187,
+      "mrr": 0.9649122807017543,
+      "evidence_in_context": 0.9924812030075187,
+      "context_recall": 0.9611528822055136
+    },
+    "no_answer": {
+      "n": 0,
+      "abstained_rate": null,
+      "grounded_rate": null
+    },
+    "searches_per_turn": 0,
+    "turns_with_search": 0,
+    "citations_mean": 4.534,
+    "must_rate": null,
+    "number_match_mean": null,
+    "grounded_rate": 0.992,
+    "citation_precision_mean": 0.415,
+    "citation_recall_mean": 0.961,
+    "lang_rate": 1,
+    "empty_rate": 0,
+    "leak_rate": 0,
+    "abstained_rate": 0.105,
+    "tokens": {
+      "n": 133,
+      "prompt_mean": 2413.571,
+      "prefill_mean": 2307.353,
+      "cached_mean": 106.218,
+      "completion_mean": 342.617,
+      "completion_p50": 297,
+      "completion_max": 1689,
+      "total_mean": 2756.188,
+      "context_mean": 2597.248,
+      "context_max": 3600,
+      "rewrite_mean": null,
+      "rewrite_turns": 0,
+      "rewrite_used": null,
+      "rewrite_ms_mean": null,
+      "session_total_mean": 2756.188,
+      "session_prefill_mean": 2307.353,
+      "fresh_excerpts_mean": 5,
+      "turns_with_fresh_excerpts": 1,
+      "search_calls_per_turn": 0,
+      "turns_with_search": 0,
+      "retrieval_ms_mean": 103.008
+    },
+    "latency": {
+      "n": 133,
+      "errors": 0,
+      "ttft_p50": 1655.2,
+      "ttft_p95": 1979.6,
+      "ttft_client_p50": 4081,
+      "tps_p50": 101.5,
+      "total_p50": 5155,
+      "total_p95": 9930,
+      "prefill_tps_p50": 1373,
+      "cache_ratio_mean": 0.018,
+      "prompt_tokens_mean": 2413.571,
+      "completion_tokens_mean": 342.617,
+      "thinking_chars_mean": 986.962
+    },
+    "stats": {
+      "turns": 133,
+      "calls": 5,
+      "calls_per_turn": 0.04,
+      "turns_with_tool": 0.022556390977443608,
+      "per_tool": {
+        "list_documents": 3,
+        "lookup_stock": 2
+      },
+      "rounds_mean": 1.04,
+      "repeat_calls": 1,
+      "limit_hits": 0,
+      "tool_errors": 0,
+      "tool_ms_total": 61
+    }
+  },
+  "agent": {
+    "n_sessions": 14,
+    "n_turns": 18,
+    "k": 5,
+    "all": {
+      "n": 7,
+      "recall": 0.7142857142857143,
+      "precision": 0.2857142857142857,
+      "hit": 0.8571428571428571,
+      "mrr": 0.8571428571428571,
+      "evidence_in_context": 0.8571428571428571,
+      "context_recall": 0.7142857142857143
+    },
+    "followup": {
+      "n": 0,
+      "recall": null,
+      "precision": null,
+      "hit": null,
+      "mrr": null,
+      "evidence_in_context": null,
+      "context_recall": null
+    },
+    "standalone": {
+      "n": 7,
+      "recall": 0.7142857142857143,
+      "precision": 0.2857142857142857,
+      "hit": 0.8571428571428571,
+      "mrr": 0.8571428571428571,
+      "evidence_in_context": 0.8571428571428571,
+      "context_recall": 0.7142857142857143
+    },
+    "no_answer": {
+      "n": 11,
+      "abstained_rate": 0.2727272727272727,
+      "grounded_rate": 0.8181818181818182
+    },
+    "by_turn": [
+      {
+        "turn": 1,
+        "n": 14,
+        "prefill": 2171.643,
+        "cached": 16.714,
+        "context": 2508.286,
+        "cache_ratio": 0.177,
+        "ttft": 1632.964
+      },
+      {
+        "turn": 2,
+        "n": 2,
+        "prefill": 1854.5,
+        "cached": 1910.5,
+        "context": 4284,
+        "cache_ratio": 0.621,
+        "ttft": 1413.05
+      },
+      {
+        "turn": 3,
+        "n": 2,
+        "prefill": 339,
+        "cached": 4224.5,
+        "context": 4695.5,
+        "cache_ratio": 0.925,
+        "ttft": 265.1
+      }
+    ],
+    "routing": {
+      "tp": 6,
+      "wrong": 0,
+      "fp": 0,
+      "fn": 1,
+      "tn": 2,
+      "auto": 9,
+      "precision": 1,
+      "recall": 0.8571428571428571
+    },
+    "args_subset_rate": 0.167,
+    "wrong_tool_rate": 0,
+    "unknown_tool_rate": 0,
+    "compactions": 0,
+    "must_rate": 0.909,
+    "number_match_mean": null,
+    "grounded_rate": 0.889,
+    "citation_precision_mean": 0.122,
+    "citation_recall_mean": 0.714,
+    "lang_rate": 1,
+    "empty_rate": 0,
+    "leak_rate": 0,
+    "abstained_rate": 0.222,
+    "tokens": {
+      "n": 18,
+      "prompt_mean": 3472.611,
+      "prefill_mean": 1932.778,
+      "cached_mean": 1539.833,
+      "completion_mean": 408.333,
+      "completion_p50": 351,
+      "completion_max": 649,
+      "total_mean": 3880.944,
+      "context_mean": 2948.611,
+      "context_max": 4896,
+      "rewrite_mean": null,
+      "rewrite_turns": 0,
+      "rewrite_used": null,
+      "rewrite_ms_mean": null,
+      "session_total_mean": 4989.786,
+      "session_prefill_mean": 2485,
+      "fresh_excerpts_mean": 4.5,
+      "turns_with_fresh_excerpts": 1,
+      "search_calls_per_turn": 0,
+      "turns_with_search": 0,
+      "retrieval_ms_mean": 119.556
+    },
+    "latency": {
+      "n": 18,
+      "errors": 0,
+      "ttft_p50": 1566.7,
+      "ttft_p95": 1827.2,
+      "ttft_client_p50": 4575,
+      "tps_p50": 88.7,
+      "total_p50": 6522,
+      "total_p95": 10536,
+      "prefill_tps_p50": 1270,
+      "cache_ratio_mean": 0.309,
+      "prompt_tokens_mean": 3472.611,
+      "completion_tokens_mean": 408.333,
+      "thinking_chars_mean": 1121.889
+    },
+    "stats": {
+      "turns": 18,
+      "calls": 6,
+      "calls_per_turn": 0.33,
+      "turns_with_tool": 0.3333333333333333,
+      "per_tool": {
+        "lookup_stock": 5,
+        "list_documents": 1
+      },
+      "rounds_mean": 1.33,
+      "repeat_calls": 0,
+      "limit_hits": 0,
+      "tool_errors": 0,
+      "tool_ms_total": 10
+    }
+  },
+  "memory": {
+    "n_sessions": 8,
+    "n_recalls": 24,
+    "memory_overall": 0.9583333333333334,
+    "by_d": [
+      {
+        "d": 1,
+        "n": 8,
+        "passed": 7,
+        "from_memory": 6,
+        "re_fetched": 1,
+        "rate": 0.875
+      },
+      {
+        "d": 3,
+        "n": 8,
+        "passed": 8,
+        "from_memory": 8,
+        "re_fetched": 0,
+        "rate": 1
+      },
+      {
+        "d": 6,
+        "n": 8,
+        "passed": 8,
+        "from_memory": 8,
+        "re_fetched": 0,
+        "rate": 1
+      }
+    ],
+    "recalled_from_memory": 0.9166666666666666,
+    "re_fetched": 0.041666666666666664,
+    "per_case": [
+      {
+        "id": "memory-01",
+        "run": 1,
+        "recalls": [
+          {
+            "turn": 3,
+            "d": 1,
+            "passed": true,
+            "re_fetched": false,
+            "recalled_from_memory": true,
+            "prompt_tokens": 4684
+          },
+          {
+            "turn": 5,
+            "d": 3,
+            "passed": true,
+            "re_fetched": false,
+            "recalled_from_memory": true,
+            "prompt_tokens": 5157
+          },
+          {
+            "turn": 8,
+            "d": 6,
+            "passed": true,
+            "re_fetched": false,
+            "recalled_from_memory": true,
+            "prompt_tokens": 8504
+          }
+        ],
+        "memory_at_d": [
+          {
+            "d": 1,
+            "passed": true
+          },
+          {
+            "d": 3,
+            "passed": true
+          },
+          {
+            "d": 6,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "id": "memory-02",
+        "run": 1,
+        "recalls": [
+          {
+            "turn": 3,
+            "d": 1,
+            "passed": true,
+            "re_fetched": false,
+            "recalled_from_memory": true,
+            "prompt_tokens": 4448
+          },
+          {
+            "turn": 5,
+            "d": 3,
+            "passed": true,
+            "re_fetched": false,
+            "recalled_from_memory": true,
+            "prompt_tokens": 6487
+          },
+          {
+            "turn": 8,
+            "d": 6,
+            "passed": true,
+            "re_fetched": false,
+            "recalled_from_memory": true,
+            "prompt_tokens": 9286
+          }
+        ],
+        "memory_at_d": [
+          {
+            "d": 1,
+            "passed": true
+          },
+          {
+            "d": 3,
+            "passed": true
+          },
+          {
+            "d": 6,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "id": "memory-03",
+        "run": 1,
+        "recalls": [
+          {
+            "turn": 3,
+            "d": 1,
+            "passed": true,
+            "re_fetched": false,
+            "recalled_from_memory": true,
+            "prompt_tokens": 3969
+          },
+          {
+            "turn": 5,
+            "d": 3,
+            "passed": true,
+            "re_fetched": false,
+            "recalled_from_memory": true,
+            "prompt_tokens": 6210
+          },
+          {
+            "turn": 8,
+            "d": 6,
+            "passed": true,
+            "re_fetched": false,
+            "recalled_from_memory": true,
+            "prompt_tokens": 7187
+          }
+        ],
+        "memory_at_d": [
+          {
+            "d": 1,
+            "passed": true
+          },
+          {
+            "d": 3,
+            "passed": true
+          },
+          {
+            "d": 6,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "id": "memory-04",
+        "run": 1,
+        "recalls": [
+          {
+            "turn": 3,
+            "d": 1,
+            "passed": true,
+            "re_fetched": false,
+            "recalled_from_memory": true,
+            "prompt_tokens": 4928
+          },
+          {
+            "turn": 5,
+            "d": 3,
+            "passed": true,
+            "re_fetched": false,
+            "recalled_from_memory": true,
+            "prompt_tokens": 7958
+          },
+          {
+            "turn": 8,
+            "d": 6,
+            "passed": true,
+            "re_fetched": false,
+            "recalled_from_memory": true,
+            "prompt_tokens": 11519
+          }
+        ],
+        "memory_at_d": [
+          {
+            "d": 1,
+            "passed": true
+          },
+          {
+            "d": 3,
+            "passed": true
+          },
+          {
+            "d": 6,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "id": "memory-05",
+        "run": 1,
+        "recalls": [
+          {
+            "turn": 3,
+            "d": 1,
+            "passed": true,
+            "re_fetched": false,
+            "recalled_from_memory": true,
+            "prompt_tokens": 6016
+          },
+          {
+            "turn": 5,
+            "d": 3,
+            "passed": true,
+            "re_fetched": false,
+            "recalled_from_memory": true,
+            "prompt_tokens": 7261
+          },
+          {
+            "turn": 8,
+            "d": 6,
+            "passed": true,
+            "re_fetched": false,
+            "recalled_from_memory": true,
+            "prompt_tokens": 9198
+          }
+        ],
+        "memory_at_d": [
+          {
+            "d": 1,
+            "passed": true
+          },
+          {
+            "d": 3,
+            "passed": true
+          },
+          {
+            "d": 6,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "id": "memory-06",
+        "run": 1,
+        "recalls": [
+          {
+            "turn": 3,
+            "d": 1,
+            "passed": true,
+            "re_fetched": false,
+            "recalled_from_memory": true,
+            "prompt_tokens": 4746
+          },
+          {
+            "turn": 5,
+            "d": 3,
+            "passed": true,
+            "re_fetched": false,
+            "recalled_from_memory": true,
+            "prompt_tokens": 7162
+          },
+          {
+            "turn": 8,
+            "d": 6,
+            "passed": true,
+            "re_fetched": false,
+            "recalled_from_memory": true,
+            "prompt_tokens": 9778
+          }
+        ],
+        "memory_at_d": [
+          {
+            "d": 1,
+            "passed": true
+          },
+          {
+            "d": 3,
+            "passed": true
+          },
+          {
+            "d": 6,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "id": "memory-07",
+        "run": 1,
+        "recalls": [
+          {
+            "turn": 3,
+            "d": 1,
+            "passed": false,
+            "re_fetched": false,
+            "recalled_from_memory": false,
+            "prompt_tokens": 4852
+          },
+          {
+            "turn": 5,
+            "d": 3,
+            "passed": true,
+            "re_fetched": false,
+            "recalled_from_memory": true,
+            "prompt_tokens": 7108
+          },
+          {
+            "turn": 8,
+            "d": 6,
+            "passed": true,
+            "re_fetched": false,
+            "recalled_from_memory": true,
+            "prompt_tokens": 9127
+          }
+        ],
+        "memory_at_d": [
+          {
+            "d": 1,
+            "passed": false
+          },
+          {
+            "d": 3,
+            "passed": true
+          },
+          {
+            "d": 6,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "id": "memory-08",
+        "run": 1,
+        "recalls": [
+          {
+            "turn": 3,
+            "d": 1,
+            "passed": true,
+            "re_fetched": true,
+            "recalled_from_memory": false,
+            "prompt_tokens": 5351
+          },
+          {
+            "turn": 5,
+            "d": 3,
+            "passed": true,
+            "re_fetched": false,
+            "recalled_from_memory": true,
+            "prompt_tokens": 7318
+          },
+          {
+            "turn": 8,
+            "d": 6,
+            "passed": true,
+            "re_fetched": false,
+            "recalled_from_memory": true,
+            "prompt_tokens": 10471
+          }
+        ],
+        "memory_at_d": [
+          {
+            "d": 1,
+            "passed": true
+          },
+          {
+            "d": 3,
+            "passed": true
+          },
+          {
+            "d": 6,
+            "passed": true
+          }
+        ]
+      }
+    ],
+    "prompt_tokens_by_turn": [
+      {
+        "turn": 1,
+        "mean": 4197.25
+      },
+      {
+        "turn": 2,
+        "mean": 6996.625
+      },
+      {
+        "turn": 3,
+        "mean": 4874.25
+      },
+      {
+        "turn": 4,
+        "mean": 6305.5
+      },
+      {
+        "turn": 5,
+        "mean": 6832.625
+      },
+      {
+        "turn": 6,
+        "mean": 10678
+      },
+      {
+        "turn": 7,
+        "mean": 9032.75
+      },
+      {
+        "turn": 8,
+        "mean": 9383.75
+      },
+      {
+        "turn": 9,
+        "mean": 13548.125
+      },
+      {
+        "turn": 10,
+        "mean": 10771.625
+      }
+    ],
+    "must_rate": 0.958,
+    "number_match_mean": null,
+    "grounded_rate": 0.988,
+    "citation_precision_mean": 0,
+    "citation_recall_mean": null,
+    "lang_rate": 1,
+    "empty_rate": 0,
+    "leak_rate": 0,
+    "abstained_rate": 0.075,
+    "latency": {
+      "n": 80,
+      "errors": 0,
+      "ttft_p50": 686.7,
+      "ttft_p95": 1754.2,
+      "ttft_client_p50": 845,
+      "tps_p50": 92.1,
+      "total_p50": 1760,
+      "total_p95": 7811,
+      "prefill_tps_p50": 1133,
+      "cache_ratio_mean": 0.827,
+      "prompt_tokens_mean": 8262.05,
+      "completion_tokens_mean": 129.563,
+      "thinking_chars_mean": 229.175
+    },
+    "stats": {
+      "turns": 80,
+      "calls": 18,
+      "calls_per_turn": 0.23,
+      "turns_with_tool": 0.15,
+      "per_tool": {
+        "lookup_stock": 17,
+        "list_documents": 1
+      },
+      "rounds_mean": 1.23,
+      "repeat_calls": 5,
+      "limit_hits": 2,
+      "tool_errors": 0,
+      "tool_ms_total": 12
+    }
+  },
+  "multiturn": {
+    "n_sessions": 8,
+    "n_cases": 8,
+    "followup_resolution": 0.8421052631578947,
+    "n_followups": 19,
+    "consistency": 1,
+    "n_pairs": 8,
+    "per_case": [
+      {
+        "id": "multiturn-01",
+        "run": 1,
+        "followups": [
+          {
+            "turn": 2,
+            "passed": true
+          },
+          {
+            "turn": 4,
+            "passed": true
+          }
+        ],
+        "consistency": [
+          {
+            "turns": [
+              1,
+              5
+            ],
+            "consistent": true,
+            "shared": [
+              "4",
+              "24"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "multiturn-02",
+        "run": 1,
+        "followups": [
+          {
+            "turn": 2,
+            "passed": true
+          },
+          {
+            "turn": 3,
+            "passed": false
+          },
+          {
+            "turn": 5,
+            "passed": true
+          }
+        ],
+        "consistency": [
+          {
+            "turns": [
+              2,
+              5
+            ],
+            "consistent": true,
+            "shared": [
+              "6",
+              "30",
+              "4",
+              "1",
+              "14",
+              "5",
+              "400",
+              "7",
+              "21"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "multiturn-03",
+        "run": 1,
+        "followups": [
+          {
+            "turn": 2,
+            "passed": true
+          },
+          {
+            "turn": 4,
+            "passed": true
+          }
+        ],
+        "consistency": [
+          {
+            "turns": [
+              1,
+              5
+            ],
+            "consistent": true,
+            "shared": [
+              "2",
+              "3.1",
+              "5",
+              "14"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "multiturn-04",
+        "run": 1,
+        "followups": [
+          {
+            "turn": 2,
+            "passed": true
+          },
+          {
+            "turn": 3,
+            "passed": true
+          },
+          {
+            "turn": 5,
+            "passed": true
+          }
+        ],
+        "consistency": [
+          {
+            "turns": [
+              1,
+              5
+            ],
+            "consistent": true,
+            "shared": [
+              "1",
+              "14",
+              "10",
+              "2",
+              "20"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "multiturn-05",
+        "run": 1,
+        "followups": [
+          {
+            "turn": 2,
+            "passed": true
+          },
+          {
+            "turn": 5,
+            "passed": true
+          }
+        ],
+        "consistency": [
+          {
+            "turns": [
+              1,
+              5
+            ],
+            "consistent": true,
+            "shared": [
+              "4",
+              "1",
+              "5",
+              "7",
+              "11",
+              "12",
+              "18"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "multiturn-06",
+        "run": 1,
+        "followups": [
+          {
+            "turn": 2,
+            "passed": true
+          },
+          {
+            "turn": 4,
+            "passed": true
+          }
+        ],
+        "consistency": [
+          {
+            "turns": [
+              1,
+              5
+            ],
+            "consistent": true,
+            "shared": [
+              "4",
+              "2",
+              "7.6",
+              "7600000"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "multiturn-07",
+        "run": 1,
+        "followups": [
+          {
+            "turn": 2,
+            "passed": false
+          },
+          {
+            "turn": 3,
+            "passed": true
+          }
+        ],
+        "consistency": [
+          {
+            "turns": [
+              1,
+              5
+            ],
+            "consistent": true,
+            "shared": [
+              "46",
+              "30",
+              "26",
+              "2"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "multiturn-08",
+        "run": 1,
+        "followups": [
+          {
+            "turn": 2,
+            "passed": false
+          },
+          {
+            "turn": 4,
+            "passed": true
+          },
+          {
+            "turn": 5,
+            "passed": true
+          }
+        ],
+        "consistency": [
+          {
+            "turns": [
+              1,
+              5
+            ],
+            "consistent": true,
+            "shared": [
+              "4",
+              "2",
+              "5"
+            ]
+          }
+        ]
+      }
+    ],
+    "must_rate": 0.921,
+    "number_match_mean": 1,
+    "grounded_rate": 0.95,
+    "citation_precision_mean": 0.189,
+    "citation_recall_mean": 0.91,
+    "lang_rate": 1,
+    "empty_rate": 0,
+    "leak_rate": 0,
+    "abstained_rate": 0.05,
+    "routing": {
+      "tp": 7,
+      "wrong": 0,
+      "fp": 1,
+      "fn": 1,
+      "tn": 31,
+      "auto": 0,
+      "precision": 0.875,
+      "recall": 0.875
+    },
+    "latency": {
+      "n": 40,
+      "errors": 0,
+      "ttft_p50": 590.2,
+      "ttft_p95": 1627.8,
+      "ttft_client_p50": 980,
+      "tps_p50": 100.2,
+      "total_p50": 2335,
+      "total_p95": 6884,
+      "prefill_tps_p50": 1296,
+      "cache_ratio_mean": 0.728,
+      "prompt_tokens_mean": 4855.775,
+      "completion_tokens_mean": 210.1,
+      "thinking_chars_mean": 434.075
+    },
+    "stats": {
+      "turns": 40,
+      "calls": 10,
+      "calls_per_turn": 0.25,
+      "turns_with_tool": 0.2,
+      "per_tool": {
+        "lookup_stock": 10
+      },
+      "rounds_mean": 1.25,
+      "repeat_calls": 1,
+      "limit_hits": 1,
+      "tool_errors": 0,
+      "tool_ms_total": 2
+    },
+    "judge": null
+  },
+  "multiquery": {
+    "n_sessions": 9,
+    "n_turns": 83,
+    "k": 5,
+    "all": {
+      "n": 74,
+      "recall": 0.9391891891891891,
+      "precision": 0.48918918918918924,
+      "hit": 1,
+      "mrr": 0.9617117117117115,
+      "evidence_in_context": 1,
+      "context_recall": 0.9639639639639639
+    },
+    "followup": {
+      "n": 34,
+      "recall": 0.9215686274509803,
+      "precision": 0.4411764705882353,
+      "hit": 1,
+      "mrr": 0.9313725490196079,
+      "evidence_in_context": 1,
+      "context_recall": 0.9754901960784313
+    },
+    "standalone": {
+      "n": 40,
+      "recall": 0.9541666666666668,
+      "precision": 0.53,
+      "hit": 1,
+      "mrr": 0.9875,
+      "evidence_in_context": 1,
+      "context_recall": 0.9541666666666668
+    },
+    "no_answer": {
+      "n": 9,
+      "abstained_rate": 0.6666666666666666,
+      "grounded_rate": 1
+    },
+    "context_tokens_by_turn": [
+      {
+        "turn": 1,
+        "n": 9,
+        "context": 2517.667,
+        "cached": 11,
+        "ttft": 1525.689
+      },
+      {
+        "turn": 2,
+        "n": 9,
+        "context": 3039.889,
+        "cached": 2353.333,
+        "ttft": 330.411
+      },
+      {
+        "turn": 3,
+        "n": 9,
+        "context": 3919.778,
+        "cached": 2944,
+        "ttft": 628.611
+      },
+      {
+        "turn": 4,
+        "n": 9,
+        "context": 4656.333,
+        "cached": 3919.778,
+        "ttft": 503.278
+      },
+      {
+        "turn": 5,
+        "n": 9,
+        "context": 5308.444,
+        "cached": 4656.333,
+        "ttft": 372.011
+      },
+      {
+        "turn": 6,
+        "n": 8,
+        "context": 5833,
+        "cached": 5222,
+        "ttft": 375.625
+      },
+      {
+        "turn": 7,
+        "n": 7,
+        "context": 6622.714,
+        "cached": 5885.714,
+        "ttft": 488.429
+      },
+      {
+        "turn": 8,
+        "n": 6,
+        "context": 7434.333,
+        "cached": 6775,
+        "ttft": 430.8
+      },
+      {
+        "turn": 9,
+        "n": 5,
+        "context": 8090.8,
+        "cached": 7329,
+        "ttft": 342.5
+      },
+      {
+        "turn": 10,
+        "n": 4,
+        "context": 8684.75,
+        "cached": 7923.25,
+        "ttft": 184.775
+      },
+      {
+        "turn": 11,
+        "n": 3,
+        "context": 8827,
+        "cached": 8097.333,
+        "ttft": 236.7
+      },
+      {
+        "turn": 12,
+        "n": 2,
+        "context": 8093,
+        "cached": 7876,
+        "ttft": 45.4
+      },
+      {
+        "turn": 13,
+        "n": 1,
+        "context": 10699,
+        "cached": 10341,
+        "ttft": 43.2
+      },
+      {
+        "turn": 14,
+        "n": 1,
+        "context": 12333,
+        "cached": 10699,
+        "ttft": 1303.5
+      },
+      {
+        "turn": 15,
+        "n": 1,
+        "context": 12604,
+        "cached": 12333,
+        "ttft": 56.3
+      }
+    ],
+    "must_rate": null,
+    "number_match_mean": null,
+    "grounded_rate": 0.976,
+    "citation_precision_mean": 0.417,
+    "citation_recall_mean": 0.939,
+    "lang_rate": 1,
+    "empty_rate": 0,
+    "leak_rate": 0,
+    "abstained_rate": 0.145,
+    "false_abstain_rate": 0.081,
+    "tokens": {
+      "n": 83,
+      "prompt_mean": 5572.265,
+      "prefill_mean": 687.337,
+      "cached_mean": 4884.928,
+      "completion_mean": 227.181,
+      "completion_p50": 191,
+      "completion_max": 1023,
+      "total_mean": 5799.446,
+      "context_mean": 5615.711,
+      "context_max": 12604,
+      "rewrite_mean": null,
+      "rewrite_turns": 0,
+      "rewrite_used": null,
+      "rewrite_ms_mean": null,
+      "session_total_mean": 53483.778,
+      "session_prefill_mean": 6338.778,
+      "fresh_excerpts_mean": 1.687,
+      "turns_with_fresh_excerpts": 0.651,
+      "search_calls_per_turn": 0,
+      "turns_with_search": 0,
+      "retrieval_ms_mean": 20.265
+    },
+    "latency": {
+      "n": 83,
+      "errors": 0,
+      "ttft_p50": 420.1,
+      "ttft_p95": 1587.5,
+      "ttft_client_p50": 617,
+      "tps_p50": 98.7,
+      "total_p50": 2544,
+      "total_p95": 7521,
+      "prefill_tps_p50": 1219,
+      "cache_ratio_mean": 0.805,
+      "prompt_tokens_mean": 5572.265,
+      "completion_tokens_mean": 227.181,
+      "thinking_chars_mean": 195.675
+    },
+    "stats": {
+      "turns": 83,
+      "calls": 3,
+      "calls_per_turn": 0.04,
+      "turns_with_tool": 0.012048192771084338,
+      "per_tool": {
+        "lookup_stock": 3
+      },
+      "rounds_mean": 1.04,
+      "repeat_calls": 2,
+      "limit_hits": 1,
+      "tool_errors": 0,
+      "tool_ms_total": 1
+    },
+    "judge": null,
+    "judge_gold": null,
+    "judge_no_answer": null
+  },
+  "stress": {
+    "n_sessions": 2,
+    "sessions": [
+      {
+        "id": "stress-01",
+        "run": 1,
+        "turns": 13,
+        "error_rate": 0,
+        "empty_rate": 0,
+        "ttft_p50": 743.8,
+        "ttft_p95": 1539.7,
+        "tps_p50": 96.6,
+        "tps_p95": 103.5,
+        "total_p50": 2275,
+        "total_p95": 8409,
+        "ttft_slope_ms_per_turn": 21.423076923076923,
+        "context_tokens_by_turn": [
+          {
+            "turn": 1,
+            "tokens": 2570
+          },
+          {
+            "turn": 2,
+            "tokens": 2793
+          },
+          {
+            "turn": 3,
+            "tokens": 4016
+          },
+          {
+            "turn": 4,
+            "tokens": 4317
+          },
+          {
+            "turn": 5,
+            "tokens": 5392
+          },
+          {
+            "turn": 6,
+            "tokens": 6004
+          },
+          {
+            "turn": 7,
+            "tokens": 7564
+          },
+          {
+            "turn": 8,
+            "tokens": 7691
+          },
+          {
+            "turn": 9,
+            "tokens": 9296
+          },
+          {
+            "turn": 10,
+            "tokens": 9908
+          },
+          {
+            "turn": 11,
+            "tokens": 11498
+          },
+          {
+            "turn": 12,
+            "tokens": 12771
+          },
+          {
+            "turn": 13,
+            "tokens": 14153
+          }
+        ],
+        "cached_tokens_by_turn": [
+          {
+            "turn": 1,
+            "tokens": 0
+          },
+          {
+            "turn": 2,
+            "tokens": 2379
+          },
+          {
+            "turn": 3,
+            "tokens": 2558
+          },
+          {
+            "turn": 4,
+            "tokens": 4016
+          },
+          {
+            "turn": 5,
+            "tokens": 4317
+          },
+          {
+            "turn": 6,
+            "tokens": 5392
+          },
+          {
+            "turn": 7,
+            "tokens": 6004
+          },
+          {
+            "turn": 8,
+            "tokens": 7564
+          },
+          {
+            "turn": 9,
+            "tokens": 7691
+          },
+          {
+            "turn": 10,
+            "tokens": 9296
+          },
+          {
+            "turn": 11,
+            "tokens": 9908
+          },
+          {
+            "turn": 12,
+            "tokens": 11498
+          },
+          {
+            "turn": 13,
+            "tokens": 12771
+          }
+        ],
+        "ctx_hit_turn": null,
+        "memory": {
+          "samples": 86,
+          "rss_tree_peak": 2234859520,
+          "rss_tree_slope_bps": -299591.42968524835,
+          "footprint_bare_peak": 789577728,
+          "footprint_bare_slope_bps": 313457.04726390605
+        }
+      },
+      {
+        "id": "stress-02",
+        "run": 1,
+        "turns": 14,
+        "error_rate": 0,
+        "empty_rate": 0,
+        "ttft_p50": 352.8,
+        "ttft_p95": 1530.3,
+        "tps_p50": 93.6,
+        "tps_p95": 104.2,
+        "total_p50": 3381,
+        "total_p95": 7942,
+        "ttft_slope_ms_per_turn": -41.22615384615384,
+        "context_tokens_by_turn": [
+          {
+            "turn": 1,
+            "tokens": 2715
+          },
+          {
+            "turn": 2,
+            "tokens": 3603
+          },
+          {
+            "turn": 3,
+            "tokens": 4192
+          },
+          {
+            "turn": 4,
+            "tokens": 5611
+          },
+          {
+            "turn": 5,
+            "tokens": 7648
+          },
+          {
+            "turn": 6,
+            "tokens": 9146
+          },
+          {
+            "turn": 7,
+            "tokens": 10006
+          },
+          {
+            "turn": 8,
+            "tokens": 10593
+          },
+          {
+            "turn": 9,
+            "tokens": 12257
+          },
+          {
+            "turn": 10,
+            "tokens": 13204
+          },
+          {
+            "turn": 11,
+            "tokens": 13792
+          },
+          {
+            "turn": 12,
+            "tokens": 15513
+          },
+          {
+            "turn": 13,
+            "tokens": 16101
+          },
+          {
+            "turn": 14,
+            "tokens": 17314
+          }
+        ],
+        "cached_tokens_by_turn": [
+          {
+            "turn": 1,
+            "tokens": 0
+          },
+          {
+            "turn": 2,
+            "tokens": 2715
+          },
+          {
+            "turn": 3,
+            "tokens": 3603
+          },
+          {
+            "turn": 4,
+            "tokens": 4192
+          },
+          {
+            "turn": 5,
+            "tokens": 5611
+          },
+          {
+            "turn": 6,
+            "tokens": 7648
+          },
+          {
+            "turn": 7,
+            "tokens": 9146
+          },
+          {
+            "turn": 8,
+            "tokens": 10006
+          },
+          {
+            "turn": 9,
+            "tokens": 10593
+          },
+          {
+            "turn": 10,
+            "tokens": 12257
+          },
+          {
+            "turn": 11,
+            "tokens": 13204
+          },
+          {
+            "turn": 12,
+            "tokens": 13792
+          },
+          {
+            "turn": 13,
+            "tokens": 15513
+          },
+          {
+            "turn": 14,
+            "tokens": 16101
+          }
+        ],
+        "ctx_hit_turn": null,
+        "memory": {
+          "samples": 103,
+          "rss_tree_peak": 2249621504,
+          "rss_tree_slope_bps": -533264.6265186057,
+          "footprint_bare_peak": 852492288,
+          "footprint_bare_slope_bps": 929369.4956061618
+        }
+      }
+    ],
+    "rss_peak_spread": 0.007,
+    "stats": {
+      "turns": 27,
+      "calls": 43,
+      "calls_per_turn": 1.59,
+      "turns_with_tool": 0.6296296296296297,
+      "per_tool": {
+        "lookup_stock": 42,
+        "list_documents": 1
+      },
+      "rounds_mean": 2.59,
+      "repeat_calls": 24,
+      "limit_hits": 12,
+      "tool_errors": 0,
+      "tool_ms_total": 10
+    },
+    "latency": {
+      "n": 27,
+      "errors": 0,
+      "ttft_p50": 681.3,
+      "ttft_p95": 1530.3,
+      "ttft_client_p50": 3013,
+      "tps_p50": 95.2,
+      "total_p50": 3230,
+      "total_p95": 7942,
+      "prefill_tps_p50": 1126,
+      "cache_ratio_mean": 0.885,
+      "prompt_tokens_mean": 24660.519,
+      "completion_tokens_mean": 204.593,
+      "thinking_chars_mean": 191.889
+    }
+  },
+  "hardware": {
+    "phases": {
+      "before_load": {
+        "samples": 14,
+        "rss_tree_peak": null,
+        "rss_tree_mean": null,
+        "rss_bare_peak": null,
+        "footprint_bare_peak": null,
+        "footprint_bare_mean": null,
+        "system_used_mean": 20543723227.429,
+        "system_used_peak": 21071970304,
+        "cpu_mean": null,
+        "gpu_util_mean": 5.643
+      },
+      "loaded_idle": {
+        "samples": 8,
+        "rss_tree_peak": 2475016192,
+        "rss_tree_mean": 2474330112,
+        "rss_bare_peak": 2357641216,
+        "footprint_bare_peak": 726663168,
+        "footprint_bare_mean": 661520384,
+        "system_used_mean": 20616376320,
+        "system_used_peak": 21094662144,
+        "cpu_mean": 1.65,
+        "gpu_util_mean": 2.125
+      },
+      "generating": {
+        "samples": 3642,
+        "rss_tree_peak": 2552397824,
+        "rss_tree_mean": 2208495635.119,
+        "rss_bare_peak": 2392899584,
+        "footprint_bare_peak": 852492288,
+        "footprint_bare_mean": 752910389.984,
+        "system_used_mean": 20804526286.937,
+        "system_used_peak": 21516320768,
+        "cpu_mean": 248.918,
+        "gpu_util_mean": 90.797
+      },
+      "after_generation": {
+        "samples": 6,
+        "rss_tree_peak": 2148548608,
+        "rss_tree_mean": 1549732522.667,
+        "rss_bare_peak": 2049212416,
+        "footprint_bare_peak": 801112064,
+        "footprint_bare_mean": 552424789.333,
+        "system_used_mean": 20549743957.333,
+        "system_used_peak": 20929265664,
+        "cpu_mean": 41.133,
+        "gpu_util_mean": 15.167
+      },
+      "after_unload": {
+        "samples": 9,
+        "rss_tree_peak": null,
+        "rss_tree_mean": 0,
+        "rss_bare_peak": null,
+        "footprint_bare_peak": null,
+        "footprint_bare_mean": null,
+        "system_used_mean": 19344124586.667,
+        "system_used_peak": 19442679808,
+        "cpu_mean": 0,
+        "gpu_util_mean": 0.333
+      }
+    },
+    "system_used_delta_load": 72653092.57099915,
+    "system_used_delta_after_unload": -1199598640.762001
+  }
+}
