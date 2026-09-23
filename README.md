@@ -226,7 +226,7 @@ Retrieval has three switches, read once at start and compared by the eval
 | `data/sessions/<id>.json` | every turn made under a session id: query, answer, citations, kind, the messages the model saw, and a small preview of a photo; `DELETE /v1/sessions/<id>` or deleting the file forgets the chat |
 | `~/.qvac/kv-cache/meridian-<id>/` | the SDK's KV state for a session, one file; kept for the newest five sessions, deleted when older ones start (`MERIDIAN_CACHED_SESSIONS`), when the session is deleted, and when the chat model unloads after an idle hour |
 | `data/traces/<run>/<requestId>.json` | only for requests with an `x-eval-run` header: hits, messages, tool rounds, stats for the eval harness |
-| `data/serve.pid` | the running server's PID |
+| `data/serve.pid` | the running server's PID; a serve on another `PORT` writes `serve-<port>.pid` and keys its KV state `meridian-<port>-<id>`, so `PORT=<port> npm run serve:stop` stops it and neither touches the other's files |
 
 Nothing else. Logs carry request metadata only: prompts and corpus text
 are never logged (`qvac.config.json` keeps the SDK's own log at `warn`, which

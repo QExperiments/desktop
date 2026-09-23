@@ -83,7 +83,14 @@ export const createServer = (runtime) => {
     return { signal: controller.signal, done: () => inflight.delete(id) }
   }
 
-  app.register(async (scope) => registerMedia(scope, runtime, sessions, track))
+  // A turn that ends unsaved -- cancelled, failed, its answer never handed
+  // over -- can still be in the session's KV file: the SDK writes every round
+  // it finishes there and moves its boundary past it. The next turn would
+  // replay the stored history on top and double the context, the dropped
+  // question included. The file goes; the next turn primes it, one prefill.
+  const forget = (session) => runtime.deleteCache(kvCacheKey(session))
+
+  app.register(async (scope) => registerMedia(scope, runtime, sessions, track, forget))
 
   app.get(`${api}/models`, (_request, reply) => {
     const state = runtime.snapshot()
@@ -167,15 +174,17 @@ export const createServer = (runtime) => {
     const tracked = track(id, reply)
     // Held until the turn is saved; see sessions.lock.
     const unlock = session ? await sessions.lock(session) : null
+    let saved = false
     try {
-      return await runTurn(request, reply, { messages, lastUser, query, session, id, signal: tracked.signal })
+      return await runTurn(request, reply, { messages, lastUser, query, session, id, signal: tracked.signal, onSaved: () => { saved = true } })
     } finally {
+      if (session && !saved) await forget(session)
       unlock?.()
       tracked.done()
     }
   })
 
-  const runTurn = async (request, reply, { messages, lastUser, query, session, id, signal }) => {
+  const runTurn = async (request, reply, { messages, lastUser, query, session, id, signal, onSaved }) => {
     const stored = session ? await sessions.context(session) : null
     const prior = stored
       ? stored.messages
@@ -200,6 +209,7 @@ export const createServer = (runtime) => {
         const turn = { kind: 'text', query, answer: result.text, citations: result.citations, messages: result.messages, shown: result.hits.filter((hit) => !hit.reused).map((hit) => hit.id), base: result.base, from: result.from, requestId: id, usage: result.usage, stats }
         // Saved before the answer ends, so the next turn reads it back.
         const saved = await sessions.append(session, turn).catch((error) => request.log.warn(error))
+        if (saved) onSaved()
         if (saved?.turns.length === 1) pruneCaches().catch((error) => request.log.warn(error))
       }
       if (evalRun) {

@@ -6,6 +6,13 @@ import qvac from '../qvac.config.json' with { type: 'json' }
 
 const abs = (rel) => fileURLToPath(new URL(rel, new URL('../', import.meta.url)))
 const base = new URL(contract.baseUrl)
+const port = Number(process.env.PORT ?? base.port)
+// Two serves of one checkout tell their files apart by port: the eval harness
+// runs one on 11435 next to the one in use. Sharing the pid file, the second
+// took `serve:stop` over; sharing the KV keys, its first chat load deleted
+// the other's session caches (src/http/server.js onChatLoad). The contract's
+// port keeps the plain names.
+const instance = port === Number(base.port) ? '' : `-${port}`
 const oneOf = (value, allowed, name) => {
   if (!allowed.includes(value)) throw new Error(`${name} must be one of ${allowed.join(', ')}, not ${value}`)
   return value
@@ -15,7 +22,7 @@ export const config = {
   // qvac-eval.json is the contract; the env vars exist so a developer can run a
   // second instance next to something else already on the port.
   host: process.env.HOST ?? base.hostname,
-  port: Number(process.env.PORT ?? base.port),
+  port,
   apiPrefix: base.pathname.replace(/\/$/, ''),
   readyTimeoutSec: contract.readyTimeoutSec,
   chatModel: contract.models.chat,
@@ -29,7 +36,9 @@ export const config = {
   // What the QVAC registry listed the last time `npm run models:list -- --refresh`
   // ran with the network up. `serve` only reads it, for GET /v1/models/catalog.
   registryPath: abs('data/models/registry.json'),
-  pidPath: abs('data/serve.pid'),
+  pidPath: abs(`data/serve${instance}.pid`),
+  // Prefix of the SDK kv-cache keys this serve owns (src/chat/answer.js kvCacheKey).
+  kvCachePrefix: `meridian${instance}`,
   sessionsDir: abs('data/sessions'),
   // Written only for requests that carry `x-eval-run`; see src/http/trace.js.
   tracesDir: abs('data/traces'),
