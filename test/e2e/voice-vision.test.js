@@ -77,7 +77,10 @@ describe('voice and vision', { skip: enabled ? false : 'set MERIDIAN_E2E=1 to ru
       asked.push(String(await runtime.look({
         prompt: 'What is the dominant colour in this image? Answer with one word.',
         imagePath: path,
-        generationParams: { temp: 0, seed: 1, predict: 12 },
+        // Qwen3.5 thinks first, and 12 tokens of thinking left no answer:
+        // reasoning off, the one word comes straight away.
+        captureThinking: true,
+        generationParams: { temp: 0, seed: 1, predict: 16, reasoning_budget: 0 },
       })).toLowerCase())
     }
 
