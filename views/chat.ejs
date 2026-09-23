@@ -62,6 +62,7 @@
       .voicebar.speaking .orb { animation: pulse 0.6s ease-in-out infinite; }
       @keyframes pulse { 50% { transform: scale(0.75); opacity: 0.7; } }
       .vstate { flex: 1; color: var(--muted); }
+      button.end { width: 2.6rem; height: 2.6rem; padding: 0; border-radius: 50%; background: var(--accent); border-color: var(--accent); color: #fff; font-size: 1.1rem; }
       @media (max-width: 720px) { aside { display: none; } }
     </style>
   </head>
@@ -95,7 +96,7 @@
           <div class="orb" id="orb"></div>
           <span class="vstate" id="vstate">Listening…</span>
           <button type="button" id="vstop" title="Stop the answer and listen again">⏹ Stop</button>
-          <button type="button" id="vend" title="Leave voice mode">✕ End</button>
+          <button type="button" id="vend" class="end" title="End voice mode" aria-label="End voice mode">✕</button>
         </div>
         <p class="hint">
           <button type="button" id="stop-speak" hidden>⏹ Stop speaking</button>
@@ -282,11 +283,11 @@
       }
 
       // ---- image turn -------------------------------------------------------
-      const postForm = async (url, fields, file, name) => {
+      const postForm = async (url, fields, file, name, signal) => {
         const data = new FormData()
         for (const [key, value] of Object.entries(fields)) data.append(key, value) // fields first: the server reads them before the file
         data.append('file', file, name)
-        const response = await fetch(url, { method: 'POST', body: data })
+        const response = await fetch(url, { method: 'POST', body: data, signal })
         if (!response.ok) await fail(response)
         return response.json()
       }
@@ -398,22 +399,39 @@
       // Speech in, answer out: one call to /audio/ask, the server keeps the
       // turn in the session, so typed and spoken turns share one conversation.
       // Resolves to the spoken answer's audio, or null when the turn failed.
-      async function voiceTurn(blob) {
+      let voiceRequest = null
+      const cancelVoiceRequest = () => {
+        const request = voiceRequest
+        if (!request) return
+        voiceRequest = null
+        request.cancelled = true
+        request.controller.abort()
+        const index = chat.history.indexOf(request.user)
+        if (index !== -1) chat.history.splice(index, 2)
+        paint()
+        end()
+      }
+      async function voiceTurn(blob, session) {
         if (busy) return null
+        const controller = new AbortController()
+        const user = { role: 'user', content: '🎤 …' }
         const reply = { role: 'assistant', content: '', citations: [], kind: 'voice' }
-        begin({ role: 'user', content: '🎤 …' }, reply)
+        const request = { session, controller, user, reply, cancelled: false }
+        voiceRequest = request
+        begin(user, reply)
         try {
-          const json = await postForm(`${api}/audio/ask`, { session: chat.session, language: 'en' }, blob, 'mic.wav')
-          chat.history.at(-2).content = json.query
+          const json = await postForm(`${api}/audio/ask`, { session: chat.session, language: 'en' }, blob, 'mic.wav', controller.signal)
+          if (request.cancelled || voice !== session) return null
+          user.content = json.query
           reply.content = json.answer
           reply.citations = json.citations ?? []
           paint()
           return json.audio?.base64 ? `data:audio/wav;base64,${json.audio.base64}` : null
         } catch (error) {
-          undo(error)
+          if (!request.cancelled) undo(error)
           return null
         } finally {
-          end()
+          if (voiceRequest === request) { voiceRequest = null; end() }
         }
       }
 
@@ -489,7 +507,7 @@
         const state = player ? 'speaking' : voice.state
         $('voicebar').className = `voicebar ${state}`
         $('vstate').textContent = { listening: voice.inSpeech ? 'Listening… (pause to send)' : 'Listening…', thinking: 'Thinking…', speaking: 'Speaking…' }[state]
-        $('vstop').disabled = !player
+        $('vstop').disabled = state === 'listening'
         if (state !== 'listening') $('orb').style.transform = ''
       }
       const setVoiceState = (state) => { if (voice) { voice.state = state; paintVoice() } }
@@ -509,7 +527,7 @@
         const mute = ctx.createGain()
         mute.gain.value = 0
         source.connect(processor); processor.connect(mute); mute.connect(ctx.destination)
-        const session = { stream, ctx, source, processor, state: 'listening', inSpeech: false, floor: VAD.minRms / VAD.ratio, pre: [], frames: [], speechMs: 0, silentMs: 0 }
+        const session = { stream, ctx, source, processor, state: 'listening', answerId: 0, inSpeech: false, floor: VAD.minRms / VAD.ratio, pre: [], frames: [], speechMs: 0, silentMs: 0 }
         voice = session
         processor.onaudioprocess = (event) => {
           if (voice !== session || session.state !== 'listening' || player) return
@@ -544,21 +562,35 @@
         Object.assign(session, { inSpeech: false, frames: [], pre: [], speechMs: 0, silentMs: 0 })
         if (speechMs - silentMs < VAD.minSpeechMs) return paintVoice()
         setVoiceState('thinking')
-        const src = await voiceTurn(encodeWav(joined(frames), session.ctx.sampleRate))
-        if (voice !== session) return
+        const answerId = ++session.answerId
+        const src = await voiceTurn(encodeWav(joined(frames), session.ctx.sampleRate), session)
+        if (voice !== session || session.answerId !== answerId) return
         if (src) {
           setVoiceState('speaking')
           await play(src)
+          if (voice !== session || session.answerId !== answerId) return
           // The tail of the answer must not be taken for the next question.
           await new Promise((resolve) => setTimeout(resolve, 300))
         }
+        if (voice === session && session.answerId === answerId) setVoiceState('listening')
+      }
+
+      function stopVoiceAnswer() {
+        const session = voice
+        if (!session || session.state === 'listening') return
+        session.answerId += 1
+        cancelVoiceRequest()
+        stopSpeaking()
+        Object.assign(session, { inSpeech: false, pre: [], frames: [], speechMs: 0, silentMs: 0 })
         setVoiceState('listening')
       }
 
       function endVoice() {
         const session = voice
         if (!session) return
+        session.answerId += 1
         voice = null
+        cancelVoiceRequest()
         stopSpeaking()
         session.processor.disconnect(); session.source.disconnect()
         for (const track of session.stream.getTracks()) track.stop()
@@ -583,7 +615,7 @@
       $('mic').addEventListener('pointerdown', (event) => { event.preventDefault(); if (!recording && !busy) startRecording().catch((error) => paint(error.message)) })
       $('voice-mode').onclick = () => startVoice()
       $('vend').onclick = endVoice
-      $('vstop').onclick = stopSpeaking
+      $('vstop').onclick = stopVoiceAnswer
       $('stop-speak').onclick = stopSpeaking
       document.addEventListener('keydown', (event) => { if (event.key === 'Escape') stopSpeaking() })
       for (const type of ['pointerup', 'pointercancel', 'pointerleave']) $('mic').addEventListener(type, () => stopRecording().catch((error) => paint(error.message)))
