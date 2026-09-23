@@ -134,7 +134,7 @@ const REWRITE_ANSWER_CHARS = 300
 const MAX_TOOL_ROUNDS = 3
 
 // The SDK's cache key for a session. Same alphabet sessions.js accepts.
-export const kvCacheKey = (session) => `meridian-${String(session).replace(/[^\w.-]/g, '_').slice(0, 64)}`
+export const kvCacheKey = (session) => `${config.kvCachePrefix}-${String(session).replace(/[^\w.-]/g, '_').slice(0, 64)}`
 
 // Every tool result goes back with this line. A small model otherwise reads
 // the result as a cue to call the tool again instead of writing the answer.
