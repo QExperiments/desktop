@@ -204,7 +204,7 @@
 
     <section>
       <h2>Image</h2>
-      <p class="hint">Needs vision weights (<code>models:fetch -- --all</code>). Photos stay on this machine.</p>
+      <p class="hint">Needs vision weights (<code>npm run models:fetch</code>). Photos stay on this machine.</p>
       <label for="img-q">Question</label>
       <input id="img-q" type="text" value="What is the part number?" />
       <label class="pick">
@@ -474,8 +474,9 @@
 
       const postFile = async (url, blob, name, extra = {}) => {
         const data = new FormData()
-        data.append('file', blob, name)
+        // Fields before the file: the server reads only the fields that precede it.
         for (const [key, value] of Object.entries(extra)) data.append(key, value)
+        data.append('file', blob, name)
         const response = await fetch(url, { method: 'POST', body: data })
         if (!response.ok) await fail(response)
         return response.json()

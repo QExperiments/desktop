@@ -13,6 +13,11 @@ import { createProfile } from './profile.js'
 const TIERS = ['L', 'M', 'S']
 const FETCH_HINT = 'run `npm run models:fetch`'
 
+// A weight this machine was never given is the operator's to fix, not a crash:
+// the HTTP layer answers it with 503 and the hint.
+const notProvisioned = (role, tier) =>
+  Object.assign(new Error(`no ${role} model provisioned for tier ${tier} — ${FETCH_HINT}`), { statusCode: 503 })
+
 export const createRuntime = ({ log = logger } = {}) => {
   // Enabled before anything else so the profiler sees the model loads: the
   // SDK records an operation only while it is on (I.6).
@@ -33,16 +38,33 @@ export const createRuntime = ({ log = logger } = {}) => {
   }
   let peer = { publicKey: '', online: false, needsNewConnection: false, pending: null }
   let monitor = null
-  let chain = Promise.resolve()
   let stopped = false
-  // Called with the role after an idle unload; the server drops the sessions'
-  // KV files when chat goes (see unloadIdle for why).
-  const idleListeners = new Set()
+  // Set by drain(): no model is handed out any more, so a tool round that
+  // starts after the cancel does not load chat back while serve shuts down.
+  let draining = false
+  // Called after every fresh load of the chat model; the server drops the
+  // sessions' KV files there (see freshChat for why).
+  const chatListeners = new Set()
 
-  const serial = (task) => {
-    const next = chain.then(task, task)
-    chain = next.then(() => {}, () => {})
-    return next
+  // Tasks run one after another, in the order they were queued.
+  const queue = () => {
+    let tail = Promise.resolve()
+    return (task) => {
+      const next = tail.then(task, task)
+      tail = next.then(() => {}, () => {})
+      return next
+    }
+  }
+  const serial = queue()
+
+  // The embeddings, whisper and TTS addons refuse a job while one is running
+  // ("a job is already set or being processed"), so two requests at once made
+  // the second fail -- and a failed embed is a chat answer without excerpts.
+  // Each on-demand role gets its own line; the LLM addon queues by itself.
+  const lanes = new Map()
+  const inLane = (role, task) => {
+    if (!lanes.has(role)) lanes.set(role, queue())
+    return lanes.get(role)(task)
   }
 
   const peerTier = () => (config.assumeStrongPeer ? 'L' : state.tier)
@@ -56,7 +78,7 @@ export const createRuntime = ({ log = logger } = {}) => {
   const directChat = async () => {
     if (direct) return direct
     const entry = entryFor(manifest, 'chat', state.tier)
-    if (!entry) throw new Error(`no chat model provisioned for tier ${state.tier} — ${FETCH_HINT}`)
+    if (!entry) throw notProvisioned('chat', state.tier)
     const spec = catalog.roles.chat
     const onGpu = (state.hardware?.backend ?? 'cpu') !== 'cpu'
     direct = createDirectChat({ log })
@@ -133,8 +155,10 @@ export const createRuntime = ({ log = logger } = {}) => {
   const loadWithFallback = async (role) => {
     const candidates = TIERS.slice(TIERS.indexOf(state.tier))
       .map((tier) => entryFor(manifest, role, tier))
-      .filter(Boolean)
-    if (!candidates.length) throw new Error(`no ${role} model provisioned for tier ${state.tier} — ${FETCH_HINT}`)
+      // An entry fetched before models.json moved on (Supertonic 2 once) is not
+      // the model the catalog describes; models:fetch replaces it.
+      .filter((entry) => entry && entry.constant === catalog.roles[role]?.models[entry.tier]?.constant)
+    if (!candidates.length) throw notProvisioned(role, state.tier)
 
     for (const [index, entry] of candidates.entries()) {
       try {
@@ -149,7 +173,23 @@ export const createRuntime = ({ log = logger } = {}) => {
     }
   }
 
-  const remember = (role, modelId, entry, delegated) => {
+  // Measured 2026-09-18 (tier M, dev Mac): after an unload and reload the SDK
+  // loads a session's KV file from disk and then prefills the whole history
+  // again on top of it, so the next turn cost 2385 prompt tokens instead of
+  // 626 and the context grew to 6.9k instead of 3.2k. How many messages a file
+  // holds is kept in the worker's memory only, so every fresh load of chat --
+  // the first one after a restart of serve, a reload after the idle unload, a
+  // failover or a reconnect -- leaves the files on disk untrustworthy. The
+  // listeners delete them before the model serves a turn, and the next turn
+  // primes a fresh file from the stored history: one clean prefill.
+  const freshChat = async () => {
+    for (const listener of chatListeners) {
+      await Promise.resolve().then(listener).catch((error) => log.warn({ err: error.message }, 'chat load listener failed'))
+    }
+  }
+  const onChatLoad = (listener) => { chatListeners.add(listener) }
+
+  const remember = async (role, modelId, entry, delegated) => {
     loaded.set(role, { modelId, entry, refs: 1, pins: 0, delegated })
 
     if (role === 'chat') {
@@ -162,6 +202,7 @@ export const createRuntime = ({ log = logger } = {}) => {
     }
 
     log.info({ role, modelId, tier: entry.tier, source: entry.source, delegated }, 'model loaded')
+    if (role === 'chat') await freshChat()
     return modelId
   }
 
@@ -174,7 +215,7 @@ export const createRuntime = ({ log = logger } = {}) => {
       const info = await sdk.getLoadedModelInfo({ modelId }).catch(() => null)
       const delegated = info?.isDelegated === true
       if (delegated) peer.needsNewConnection = false
-      return remember(role, modelId, { ...spec, role, tier: peerTier(), source: 'registry' }, delegated)
+      return await remember(role, modelId, { ...spec, role, tier: peerTier(), source: 'registry' }, delegated)
     } catch (error) {
       log.warn({ role, err: error.message }, 'delegated load failed; loading local model')
       return null
@@ -182,6 +223,7 @@ export const createRuntime = ({ log = logger } = {}) => {
   }
 
   const acquireNow = async (role, { pin = true } = {}) => {
+    if (draining) throw Object.assign(new Error('serve is shutting down'), { statusCode: 503 })
     clearTimeout(idleTimers.get(role))
     idleTimers.delete(role)
     const held = loaded.get(role)
@@ -194,7 +236,7 @@ export const createRuntime = ({ log = logger } = {}) => {
 
     if (!await tryDelegated(role)) {
       const local = await loadWithFallback(role)
-      remember(role, local.modelId, local.entry, false)
+      await remember(role, local.modelId, local.entry, false)
     }
 
     const created = loaded.get(role)
@@ -222,19 +264,11 @@ export const createRuntime = ({ log = logger } = {}) => {
   const idleFor = (role) => (isResident(role) ? config.residentIdleMs : config.idleUnloadMs)
   const inUse = (role, held) => (isResident(role) ? held.pins > 0 : held.refs > 0)
 
-  // Measured 2026-09-18 (tier M, dev Mac): after an unload and reload the SDK
-  // loads a session's KV file from disk and then prefills the whole history
-  // again on top of it, so the next turn cost 2385 prompt tokens instead of
-  // 626 and the context grew to 6.9k instead of 3.2k. The listeners delete
-  // the sessions' KV files instead, and the next turn primes a fresh file from
-  // the stored history: one clean prefill, the same as reopening an old session.
   const unloadIdle = (role) => serial(async () => {
     const held = loaded.get(role)
     if (!held || inUse(role, held)) return
     await unloadNow(role, { idle: true })
-    for (const listener of idleListeners) await Promise.resolve().then(() => listener(role)).catch((error) => log.warn({ role, err: error.message }, 'idle listener failed'))
   })
-  const onIdleUnload = (listener) => { idleListeners.add(listener) }
 
   const armIdle = (role) => {
     const held = loaded.get(role)
@@ -260,7 +294,7 @@ export const createRuntime = ({ log = logger } = {}) => {
     for (const role of roles) {
       if (!catalog.roles[role]?.resident) continue
       const { modelId, entry } = await loadWithFallback(role)
-      remember(role, modelId, entry, false)
+      await remember(role, modelId, entry, false)
       armIdle(role)
     }
   }
@@ -283,7 +317,7 @@ export const createRuntime = ({ log = logger } = {}) => {
 
       if (catalog.roles[role]?.resident) {
         const local = await loadWithFallback(role)
-        remember(role, local.modelId, local.entry, false)
+        await remember(role, local.modelId, local.entry, false)
       }
       armIdle(role)
     }
@@ -321,7 +355,9 @@ export const createRuntime = ({ log = logger } = {}) => {
     if (held.pins > 0) held.pins -= 1
     if (!isResident(role)) held.refs -= 1
     armIdle(role)
-    void settlePeer()
+    // Fire and forget, but not unhandled: a failover that cannot load the
+    // local model would otherwise take the whole process down.
+    settlePeer().catch((error) => log.error({ err: error.message }, 'switching between peer and local failed'))
   }
 
   const hold = async (role, use) => {
@@ -418,15 +454,24 @@ export const createRuntime = ({ log = logger } = {}) => {
     return snapshot()
   }
 
+  // The first half of a shutdown: cancel everything in flight and hand out no
+  // model from now on. serve calls it before closing the HTTP server, whose
+  // close waits for the requests still open -- without it, for a generation
+  // that can run for minutes on the fleet laptop.
+  const drain = () => {
+    draining = true
+    state.ready = false
+    return registry.stopAll()
+  }
+
   const stop = async () => {
     if (stopped) return
     stopped = true
-    state.ready = false
     monitor?.stop()
     peer.pending = null
     for (const timer of idleTimers.values()) clearTimeout(timer)
     idleTimers.clear()
-    const cancelled = await registry.stopAll()
+    const cancelled = await drain()
 
     for (const [role, held] of loaded) {
       await sdk.unloadModel({ modelId: held.modelId }).catch((error) => log.warn({ role, err: error.message }, 'unload failed'))
@@ -456,8 +501,8 @@ export const createRuntime = ({ log = logger } = {}) => {
     }
   }
 
-  const embed = (text) =>
-    hold('embed', (modelId) => registry.run({ kind: 'embeddings', role: 'embed' }, () => sdk.embed({ modelId, text })))
+  const embed = (text) => inLane('embed', () =>
+    hold('embed', (modelId) => registry.run({ kind: 'embeddings', role: 'embed' }, () => sdk.embed({ modelId, text }))))
 
   // Drops the KV-cache files the SDK keeps for one session key (req 6.3
   // cleanup). Nothing else on disk is touched; the session's turns stay.
@@ -466,9 +511,9 @@ export const createRuntime = ({ log = logger } = {}) => {
     return { success: false }
   })
 
-  const transcribe = (audio, params = {}) =>
+  const transcribe = (audio, params = {}) => inLane('asr', () =>
     hold('asr', (modelId) => registry.run({ kind: 'transcription', role: 'asr' }, () =>
-      sdk.transcribe({ modelId, audioChunk: audio, ...params })))
+      sdk.transcribe({ modelId, audioChunk: audio, ...params }))))
 
   const transcribeStream = async (params = {}) => {
     const modelId = await acquire('asr')
@@ -477,12 +522,12 @@ export const createRuntime = ({ log = logger } = {}) => {
     return { session, close: () => release('asr') }
   }
 
-  const speak = (text, params = {}) =>
+  const speak = (text, params = {}) => inLane('tts', () =>
     hold('tts', (modelId) => registry.run({ kind: 'tts', role: 'tts' },
       () => sdk.textToSpeech({ modelId, text, inputType: 'text', stream: false, ...params }),
-      (run) => run.buffer))
+      (run) => run.buffer)))
 
-  const look = ({ prompt, imagePath, ...params }) =>
+  const look = ({ prompt, imagePath, ...params }) => inLane('vision', () =>
     hold('vision', async (modelId) => {
       const run = sdk.completion({
         modelId,
@@ -497,7 +542,7 @@ export const createRuntime = ({ log = logger } = {}) => {
       } finally {
         registry.drop(run.requestId)
       }
-    })
+    }))
 
   // GET /v1/models/catalog: read-only, from models.json, the manifest and the
   // registry snapshot `models:list --refresh` left on disk. Never downloads.
@@ -531,5 +576,5 @@ export const createRuntime = ({ log = logger } = {}) => {
     inflight: registry.list().map(({ abort, ...rest }) => rest),
   })
 
-  return { start, stop, acquire, release, completion, directChat, embed, deleteCache, transcribe, transcribeStream, speak, look, snapshot, modelCatalog, onIdleUnload, cancel: registry.stop, profile }
+  return { start, stop, acquire, release, completion, directChat, embed, deleteCache, transcribe, transcribeStream, speak, look, snapshot, modelCatalog, onChatLoad, drain, cancel: registry.stop, profile }
 }

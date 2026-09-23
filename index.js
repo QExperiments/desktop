@@ -12,12 +12,32 @@ const app = createServer(runtime)
 // stopped -- and exits the process while the first is still unloading the
 // models and writing the profile.
 let closing = null
+// The pid file is ours only once this process wrote it. A second `serve` that
+// fails with EADDRINUSE must leave the running server's file alone, or
+// `serve:stop` can no longer find it.
+let ownsPid = false
+const dropPid = () => (ownsPid ? rm(config.pidPath, { force: true }) : undefined)
+
+// The SDK's own SIGTERM handler kills its Bare worker first and raises the
+// signal again (hence two "shutting down" lines). The unloads below then talk
+// to a dead worker; most fail at once, but one was seen to never settle, and
+// serve hung until `serve:stop` killed it. The models went with the worker, so
+// past this grace the process just exits.
+const SHUTDOWN_GRACE_MS = 10_000
+
 const shutdown = (signal) => {
   app.log.info({ signal }, 'shutting down')
   closing ??= (async () => {
+    setTimeout(() => {
+      app.log.warn({ graceMs: SHUTDOWN_GRACE_MS }, 'shutdown did not finish in time; exiting')
+      Promise.resolve(dropPid()).finally(() => process.exit(0))
+    }, SHUTDOWN_GRACE_MS).unref()
+    // Cancel what is generating first: app.close() waits for open requests,
+    // and a turn left running would hold the models for as long as it takes.
+    await runtime.drain().catch((error) => app.log.error(error))
     await app.close().catch((error) => app.log.error(error))
     await runtime.stop().catch((error) => app.log.error(error))
-    await rm(config.pidPath, { force: true })
+    await dropPid()
     process.exit(0)
   })()
   return closing
@@ -31,11 +51,12 @@ try {
   await app.listen({ host: config.host, port: config.port })
   await mkdir(dirname(config.pidPath), { recursive: true })
   await writeFile(config.pidPath, `${process.pid}\n`)
+  ownsPid = true
   const state = await runtime.start()
   app.log.info({ tier: state.tier, models: state.models }, 'ready')
 } catch (error) {
   app.log.error(error)
   await runtime.stop().catch(() => {})
-  await rm(config.pidPath, { force: true })
+  await dropPid()
   process.exit(1)
 }

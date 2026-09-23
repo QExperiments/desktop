@@ -53,6 +53,16 @@
       textarea { width: 100%; font: inherit; resize: none; min-height: 2.6rem; max-height: 10rem; padding: 0.55rem 0.8rem; border: 1px solid var(--line); border-radius: 12px; background: #fff; color: var(--ink); }
       textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
       .hint { max-width: 760px; margin: 0.35rem auto 0; color: var(--muted); font-size: 0.75rem; text-align: center; display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
+      button.voice { width: 2.6rem; height: 2.6rem; padding: 0; border-radius: 50%; background: var(--ink); border-color: var(--ink); color: #fff; display: inline-flex; align-items: center; justify-content: center; }
+      button.voice svg, .voicebar svg { width: 1.2rem; height: 1.2rem; }
+      .composer[hidden], .voicebar[hidden], #stop-speak[hidden] { display: none; }
+      .voicebar { max-width: 760px; margin: 0 auto; display: flex; align-items: center; gap: 0.9rem; min-height: 2.6rem; }
+      .orb { width: 2.4rem; height: 2.4rem; flex: none; border-radius: 50%; background: var(--accent); transition: transform 80ms linear; }
+      .voicebar.thinking .orb { animation: pulse 1s ease-in-out infinite; background: var(--muted); }
+      .voicebar.speaking .orb { animation: pulse 0.6s ease-in-out infinite; }
+      @keyframes pulse { 50% { transform: scale(0.75); opacity: 0.7; } }
+      .vstate { flex: 1; color: var(--muted); }
+      button.end { width: 2.6rem; height: 2.6rem; padding: 0; border-radius: 50%; background: var(--accent); border-color: var(--accent); color: #fff; font-size: 1.1rem; }
       @media (max-width: 720px) { aside { display: none; } }
     </style>
   </head>
@@ -69,18 +79,27 @@
       </header>
       <main id="main"><div class="thread" id="thread"></div></main>
       <footer>
-        <div class="composer">
+        <div class="composer" id="composer">
           <button type="button" class="icon" id="attach-btn" title="Attach an image">+</button>
           <input type="file" id="img" accept="image/*" hidden>
           <div class="box">
             <div class="attach" id="attach" hidden><img id="attach-img" alt=""><span id="attach-name"></span><button type="button" id="attach-x">Remove</button></div>
             <textarea id="q" rows="1" placeholder="Ask about the documents or stock. Enter sends, Shift+Enter is a new line."></textarea>
           </div>
-          <button type="button" class="icon" id="mic" title="Hold to talk">🎤</button>
+          <button type="button" class="icon" id="mic" title="Hold to dictate">🎤</button>
           <button type="button" class="primary" id="send">Send</button>
+          <button type="button" class="voice" id="voice-mode" title="Voice mode: talk hands-free, hear the answers">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="3" y="9" width="2.5" height="6" rx="1.25"/><rect x="8" y="5" width="2.5" height="14" rx="1.25"/><rect x="13" y="7" width="2.5" height="10" rx="1.25"/><rect x="18" y="10" width="2.5" height="4" rx="1.25"/></svg>
+          </button>
+        </div>
+        <div class="voicebar" id="voicebar" hidden>
+          <div class="orb" id="orb"></div>
+          <span class="vstate" id="vstate">Listening…</span>
+          <button type="button" id="vstop" title="Stop the answer and listen again">⏹ Stop</button>
+          <button type="button" id="vend" class="end" title="End voice mode" aria-label="End voice mode">✕</button>
         </div>
         <p class="hint">
-          <label><input type="checkbox" id="voice-reply"> Voice reply: hold the mic, hear the answer</label>
+          <button type="button" id="stop-speak" hidden>⏹ Stop speaking</button>
           <span>Answers come from the ingested documents and the stock tool only.</span>
         </p>
       </footer>
@@ -264,11 +283,11 @@
       }
 
       // ---- image turn -------------------------------------------------------
-      const postForm = async (url, fields, file, name) => {
+      const postForm = async (url, fields, file, name, signal) => {
         const data = new FormData()
         for (const [key, value] of Object.entries(fields)) data.append(key, value) // fields first: the server reads them before the file
         data.append('file', file, name)
-        const response = await fetch(url, { method: 'POST', body: data })
+        const response = await fetch(url, { method: 'POST', body: data, signal })
         if (!response.ok) await fail(response)
         return response.json()
       }
@@ -327,6 +346,7 @@
         new Uint8Array(buffer, 44).set(new Uint8Array(pcm.buffer))
         return new Blob([buffer], { type: 'audio/wav' })
       }
+      // Hold-to-dictate: the words go into the box, nothing is sent.
       let recording = null
       const startRecording = async () => {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
@@ -342,15 +362,19 @@
           stop: async () => {
             processor.disconnect(); source.disconnect()
             for (const track of stream.getTracks()) track.stop()
-            const samples = new Float32Array(chunks.reduce((n, c) => n + c.length, 0))
-            let offset = 0
-            for (const chunk of chunks) { samples.set(chunk, offset); offset += chunk.length }
-            const blob = encodeWav(samples, ctx.sampleRate)
+            const blob = encodeWav(joined(chunks), ctx.sampleRate)
+            const seconds = chunks.reduce((n, c) => n + c.length, 0) / ctx.sampleRate
             await ctx.close()
-            return { blob, seconds: samples.length / ctx.sampleRate }
+            return { blob, seconds }
           },
         }
         $('mic').classList.add('live')
+      }
+      const joined = (chunks) => {
+        const samples = new Float32Array(chunks.reduce((n, c) => n + c.length, 0))
+        let offset = 0
+        for (const chunk of chunks) { samples.set(chunk, offset); offset += chunk.length }
+        return samples
       }
       const stopRecording = async () => {
         if (!recording) return
@@ -358,9 +382,7 @@
         recording = null
         $('mic').classList.remove('live')
         const { blob, seconds } = await stop()
-        if (seconds < 0.5) return
-        if ($('voice-reply').checked) await voiceTurn(blob)
-        else await dictate(blob)
+        if (seconds >= 0.5) await dictate(blob)
       }
       async function dictate(blob) {
         $('mic').disabled = true
@@ -374,49 +396,209 @@
           $('mic').disabled = false
         }
       }
-      // Speech in, spoken answer out: one call to /audio/ask, the server keeps the turn.
-      async function voiceTurn(blob) {
-        if (busy) return
-        const reply = { role: 'assistant', content: '', citations: [], kind: 'voice' }
-        begin({ role: 'user', content: '' }, reply)
-        chat.history.at(-2).content = '🎤 …'
+      // Speech in, answer out: one call to /audio/ask, the server keeps the
+      // turn in the session, so typed and spoken turns share one conversation.
+      // Resolves to the spoken answer's audio, or null when the turn failed.
+      let voiceRequest = null
+      const cancelVoiceRequest = () => {
+        const request = voiceRequest
+        if (!request) return
+        voiceRequest = null
+        request.cancelled = true
+        request.controller.abort()
+        const index = chat.history.indexOf(request.user)
+        if (index !== -1) chat.history.splice(index, 2)
         paint()
+        end()
+      }
+      async function voiceTurn(blob, session) {
+        if (busy) return null
+        const controller = new AbortController()
+        const user = { role: 'user', content: '🎤 …' }
+        const reply = { role: 'assistant', content: '', citations: [], kind: 'voice' }
+        const request = { session, controller, user, reply, cancelled: false }
+        voiceRequest = request
+        begin(user, reply)
         try {
-          const json = await postForm(`${api}/audio/ask`, { session: chat.session, language: 'en' }, blob, 'mic.wav')
-          chat.history.at(-2).content = json.query
+          const json = await postForm(`${api}/audio/ask`, { session: chat.session, language: 'en' }, blob, 'mic.wav', controller.signal)
+          if (request.cancelled || voice !== session) return null
+          user.content = json.query
           reply.content = json.answer
           reply.citations = json.citations ?? []
           paint()
-          if (json.audio?.base64) play(`data:audio/wav;base64,${json.audio.base64}`)
+          return json.audio?.base64 ? `data:audio/wav;base64,${json.audio.base64}` : null
         } catch (error) {
-          undo(error)
+          if (!request.cancelled) undo(error)
+          return null
         } finally {
-          end()
+          if (voiceRequest === request) { voiceRequest = null; end() }
         }
       }
-      let player = null
-      const play = (src, button) => {
-        if (player) { player.audio.pause(); player.button?.classList.remove('live'); player = null }
-        const audio = new Audio(src)
-        player = { audio, button }
-        button?.classList.add('live')
-        audio.onended = () => { button?.classList.remove('live'); if (player?.audio === audio) player = null }
-        audio.play().catch(() => {})
+
+      // ---- speaking ---------------------------------------------------------
+      // One answer plays at a time. Stop (the button, Esc, or the speaker
+      // again) cuts it off; play() resolves when it ends either way.
+      let player = null // { audio, button, done }
+      const paintSpeaking = () => {
+        $('stop-speak').hidden = !player || Boolean(voice)
+        if (voice) paintVoice()
       }
+      const stopSpeaking = () => {
+        if (!player) return
+        const { audio, button, done } = player
+        player = null
+        audio.pause()
+        button?.classList.remove('live')
+        done()
+        paintSpeaking()
+      }
+      const play = (src, button) => new Promise((resolve) => {
+        stopSpeaking()
+        const audio = new Audio(src)
+        const finish = () => {
+          if (player?.audio !== audio) return resolve()
+          player = null
+          button?.classList.remove('live')
+          paintSpeaking()
+          resolve()
+        }
+        player = { audio, button, done: resolve }
+        button?.classList.add('live')
+        audio.onended = finish
+        audio.onerror = finish
+        audio.play().catch(finish)
+        paintSpeaking()
+      })
       async function speak(text, button) {
-        if (player?.button === button) { player.audio.pause(); button.classList.remove('live'); player = null; return }
+        if (player?.button === button) return stopSpeaking()
         button.disabled = true
         try {
           const response = await fetch(`${api}/audio/speech`, {
             method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ input: text, language: 'en' }),
           })
           if (!response.ok) await fail(response)
-          play(URL.createObjectURL(await response.blob()), button)
+          const src = URL.createObjectURL(await response.blob())
+          button.disabled = false
+          await play(src, button)
+          URL.revokeObjectURL(src)
         } catch (error) {
           paint(error.message)
         } finally {
           button.disabled = false
         }
+      }
+
+      // ---- voice mode -------------------------------------------------------
+      // Hands-free, like ChatGPT's voice button: the page listens, takes the
+      // silence after a sentence as its end, sends it through voiceTurn,
+      // speaks the answer and listens again. The microphone is ignored while
+      // the answer is prepared and spoken, so the assistant never hears itself.
+      const VAD = {
+        minRms: 0.012, // below this is silence whatever the room
+        ratio: 3, // speech is this many times louder than the room's noise floor
+        silenceMs: 900, // this much quiet after speech ends the sentence
+        minSpeechMs: 350, // shorter bursts (a cough, a click) are dropped
+        maxMs: 30000, // a sentence is cut here and sent
+        preRoll: 4, // frames kept from before the speech started
+      }
+      let voice = null
+      const paintVoice = () => {
+        if (!voice) return
+        const state = player ? 'speaking' : voice.state
+        $('voicebar').className = `voicebar ${state}`
+        $('vstate').textContent = { listening: voice.inSpeech ? 'Listening… (pause to send)' : 'Listening…', thinking: 'Thinking…', speaking: 'Speaking…' }[state]
+        $('vstop').disabled = state === 'listening'
+        if (state !== 'listening') $('orb').style.transform = ''
+      }
+      const setVoiceState = (state) => { if (voice) { voice.state = state; paintVoice() } }
+
+      async function startVoice() {
+        if (voice || busy) return
+        stopSpeaking()
+        let stream
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } })
+        } catch (error) {
+          return paint(`Microphone unavailable: ${error.message}`)
+        }
+        const ctx = new AudioContext()
+        const source = ctx.createMediaStreamSource(stream)
+        const processor = ctx.createScriptProcessor(2048, 1, 1)
+        const mute = ctx.createGain()
+        mute.gain.value = 0
+        source.connect(processor); processor.connect(mute); mute.connect(ctx.destination)
+        const session = { stream, ctx, source, processor, state: 'listening', answerId: 0, inSpeech: false, floor: VAD.minRms / VAD.ratio, pre: [], frames: [], speechMs: 0, silentMs: 0 }
+        voice = session
+        processor.onaudioprocess = (event) => {
+          if (voice !== session || session.state !== 'listening' || player) return
+          const frame = new Float32Array(event.inputBuffer.getChannelData(0))
+          let sum = 0
+          for (const x of frame) sum += x * x
+          const rms = Math.sqrt(sum / frame.length)
+          const ms = (frame.length / ctx.sampleRate) * 1000
+          const loud = rms > Math.max(VAD.minRms, session.floor * VAD.ratio)
+          $('orb').style.transform = `scale(${1 + Math.min(rms * 8, 0.6)})`
+          if (!session.inSpeech) {
+            session.floor = session.floor * 0.95 + rms * 0.05
+            session.pre.push(frame)
+            if (session.pre.length > VAD.preRoll) session.pre.shift()
+            if (!loud) return
+            Object.assign(session, { inSpeech: true, frames: session.pre, pre: [], speechMs: 0, silentMs: 0 })
+            paintVoice()
+            return
+          }
+          session.frames.push(frame)
+          session.speechMs += ms
+          session.silentMs = loud ? 0 : session.silentMs + ms
+          if (session.silentMs >= VAD.silenceMs || session.speechMs >= VAD.maxMs) utterance(session)
+        }
+        $('composer').hidden = true
+        $('voicebar').hidden = false
+        paintVoice()
+      }
+
+      async function utterance(session) {
+        const { frames, speechMs, silentMs } = session
+        Object.assign(session, { inSpeech: false, frames: [], pre: [], speechMs: 0, silentMs: 0 })
+        if (speechMs - silentMs < VAD.minSpeechMs) return paintVoice()
+        setVoiceState('thinking')
+        const answerId = ++session.answerId
+        const src = await voiceTurn(encodeWav(joined(frames), session.ctx.sampleRate), session)
+        if (voice !== session || session.answerId !== answerId) return
+        if (src) {
+          setVoiceState('speaking')
+          await play(src)
+          if (voice !== session || session.answerId !== answerId) return
+          // The tail of the answer must not be taken for the next question.
+          await new Promise((resolve) => setTimeout(resolve, 300))
+        }
+        if (voice === session && session.answerId === answerId) setVoiceState('listening')
+      }
+
+      function stopVoiceAnswer() {
+        const session = voice
+        if (!session || session.state === 'listening') return
+        session.answerId += 1
+        cancelVoiceRequest()
+        stopSpeaking()
+        Object.assign(session, { inSpeech: false, pre: [], frames: [], speechMs: 0, silentMs: 0 })
+        setVoiceState('listening')
+      }
+
+      function endVoice() {
+        const session = voice
+        if (!session) return
+        session.answerId += 1
+        voice = null
+        cancelVoiceRequest()
+        stopSpeaking()
+        session.processor.disconnect(); session.source.disconnect()
+        for (const track of session.stream.getTracks()) track.stop()
+        session.ctx.close().catch(() => {})
+        $('voicebar').hidden = true
+        $('composer').hidden = false
+        paintSpeaking()
+        $('q').focus()
       }
 
       // ---- wiring -----------------------------------------------------------
@@ -431,6 +613,11 @@
       })
       $('attach-x').onclick = () => setAttached(null)
       $('mic').addEventListener('pointerdown', (event) => { event.preventDefault(); if (!recording && !busy) startRecording().catch((error) => paint(error.message)) })
+      $('voice-mode').onclick = () => startVoice()
+      $('vend').onclick = endVoice
+      $('vstop').onclick = stopVoiceAnswer
+      $('stop-speak').onclick = stopSpeaking
+      document.addEventListener('keydown', (event) => { if (event.key === 'Escape') stopSpeaking() })
       for (const type of ['pointerup', 'pointercancel', 'pointerleave']) $('mic').addEventListener(type, () => stopRecording().catch((error) => paint(error.message)))
 
       if (!paintStatus(JSON.parse($('boot').textContent))) pollReady()

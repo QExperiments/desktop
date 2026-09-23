@@ -134,24 +134,25 @@
         "language": "en",
         "outputSampleRate": 24000
       },
+      "note": "Supertonic 3, not 2: Supertonic 2 rejects Cyrillic (`text preprocessing failed: unsupported character U+1057`), so speaking any Russian answer was a 500. Loaded with language en, Supertonic 3 speaks English, Russian and German text that whisper transcribes back word for word. The addon reads language and voice at load time only; the per-request fields of /audio/speech change nothing.",
       "models": {
         "S": {
-          "constant": "TTS_MULTILINGUAL_SUPERTONIC2_Q4_0",
-          "file": "supertonic2-q4_0.gguf",
-          "bytes": 132008192,
-          "sha256": "ae65553d8841fbff7b1674faa32ff2d4235d8f6501f1e4aba87b17e01c4ab00e"
+          "constant": "TTS_MULTILINGUAL_SUPERTONIC3_Q4_0",
+          "file": "supertonic3-q4_0.gguf",
+          "bytes": 84658368,
+          "sha256": "e3f3edc816b3fb4d8dae0067b2cc7e3dbeaac1e78e21293c803bd57011425fb7"
         },
         "M": {
-          "constant": "TTS_MULTILINGUAL_SUPERTONIC2_Q4_0",
-          "file": "supertonic2-q4_0.gguf",
-          "bytes": 132008192,
-          "sha256": "ae65553d8841fbff7b1674faa32ff2d4235d8f6501f1e4aba87b17e01c4ab00e"
+          "constant": "TTS_MULTILINGUAL_SUPERTONIC3_Q4_0",
+          "file": "supertonic3-q4_0.gguf",
+          "bytes": 84658368,
+          "sha256": "e3f3edc816b3fb4d8dae0067b2cc7e3dbeaac1e78e21293c803bd57011425fb7"
         },
         "L": {
-          "constant": "TTS_MULTILINGUAL_SUPERTONIC2_Q8_0",
-          "file": "supertonic2-q8_0.gguf",
-          "bytes": 251845952,
-          "sha256": "f02eec8230184523d88a85e16ff715f002e802322a89e56455693993d22a4ecf"
+          "constant": "TTS_MULTILINGUAL_SUPERTONIC3_Q8_0",
+          "file": "supertonic3-q8_0.gguf",
+          "bytes": 126745792,
+          "sha256": "139ba4f76ff1c703cd072030b4e28fa009593162dc686aa2b3ce588991179899"
         }
       }
     },

@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 // Same alphabet the KV-cache key allows, so one id names both.
@@ -22,6 +22,7 @@ export const isSessionId = (id) => typeof id === 'string' && VALID.test(id)
 // for message. `shown` lists the chunk ids the turn put in front of the model.
 export const createSessions = (dir) => {
   const queues = new Map()
+  const turns = new Map()
   const file = (id) => join(dir, `${id}.json`)
 
   const read = async (id) => {
@@ -33,11 +34,30 @@ export const createSessions = (dir) => {
     }
   }
 
-  // Writes to one session run in order: a voice turn and a text turn can land together.
+  // Reads and writes of one session run in order, so a read queued after a
+  // write sees it.
   const serial = (id, task) => {
     const next = (queues.get(id) ?? Promise.resolve()).then(task, task)
     queues.set(id, next.catch(() => {}))
     return next
+  }
+
+  // One turn of a session at a time, from reading its history to saving the
+  // answer. Two turns at once -- a text and a voice turn, or a client that
+  // retries -- would both replay the same history into one KV cache and then
+  // save their messages in an order the cache never saw. Resolves to the
+  // release function; a turn that never calls it blocks the session.
+  const lock = async (id) => {
+    const previous = turns.get(id) ?? Promise.resolve()
+    let release
+    const held = new Promise((resolve) => { release = resolve })
+    const tail = previous.then(() => held)
+    turns.set(id, tail)
+    await previous
+    return () => {
+      release()
+      if (turns.get(id) === tail) turns.delete(id)
+    }
   }
 
   const get = async (id) => (VALID.test(String(id)) ? read(id) : null)
@@ -50,7 +70,10 @@ export const createSessions = (dir) => {
       const session = (await read(id)) ?? { id, title: String(turn.query ?? '').slice(0, 80), createdAt: now, turns: [] }
       session.turns.push({ at: now, ...turn })
       session.updatedAt = now
-      await writeFile(file(id), JSON.stringify(session))
+      // A reader never meets half a file: the new one is renamed over the old.
+      const temp = `${file(id)}.tmp`
+      await writeFile(temp, JSON.stringify(session))
+      await rename(temp, file(id))
       return session
     })
   }
@@ -69,7 +92,7 @@ export const createSessions = (dir) => {
   // them, and the `base` of the last turn (src/chat/answer.js: where the
   // excerpts the cached state holds begin). A turn written before messages
   // were stored is replayed as the plain question and answer.
-  const context = async (id) => {
+  const context = (id) => serial(id, async () => {
     const turns = (await get(id))?.turns ?? []
     const messages = []
     const shown = []
@@ -86,7 +109,7 @@ export const createSessions = (dir) => {
       if (Number.isFinite(turn.from)) from = turn.from
     }
     return { messages, shown, base, from }
-  }
+  })
 
   const history = async (id) => (await context(id)).messages
 
@@ -100,5 +123,5 @@ export const createSessions = (dir) => {
     }))
   }
 
-  return { get, append, list, context, history, remove }
+  return { get, append, list, context, history, remove, lock }
 }

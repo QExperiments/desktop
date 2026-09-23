@@ -372,7 +372,10 @@ const rewriteQuery = async (runtime, prior, query) => {
 // answer), the chunks shown (automatic and tool-retrieved), the retrieval hits,
 // the retrieval block (mode, fusion, the query searched, the rewrite) and the
 // `base` this turn ran with, which the next turn passes back in.
-export const answer = async (runtime, { messages, session, shown = [], base: storedBase = 0, from: storedFrom = 0, onDelta, generationParams: asked = {}, ...params }) => {
+// Thrown when the client went away or cancelled the turn: nothing is saved.
+export const cancelled = () => Object.assign(new Error('cancelled by the client'), { statusCode: 499, cancelled: true })
+
+export const answer = async (runtime, { messages, session, shown = [], base: storedBase = 0, from: storedFrom = 0, onDelta, generationParams: asked = {}, signal, ...params }) => {
   const startedAt = Date.now()
   const query = messages.at(-1)?.role === 'user' ? messages.at(-1).content : ''
   const earlier = messages.slice(0, messages.at(-1)?.role === 'user' ? -1 : undefined).map(({ role, content }) => ({ role, content }))
@@ -551,7 +554,11 @@ export const answer = async (runtime, { messages, session, shown = [], base: sto
   const tries = {}
   let lastText = ''
   for (let round = 0; ; round++) {
-    const { run, settle } = await nextRound(round)
+    if (signal?.aborted) throw cancelled()
+    const { run, requestId, settle } = await nextRound(round)
+    // An abort cancels the round in flight by its SDK request id.
+    const stop = () => { if (requestId) runtime.cancel?.(requestId) }
+    signal?.addEventListener('abort', stop, { once: true })
 
     try {
       // The SDK keeps a declared tool's call out of the delta stream. An
@@ -565,6 +572,7 @@ export const answer = async (runtime, { messages, session, shown = [], base: sto
       if (onDelta) for await (const event of run.events) if (event.type === 'contentDelta') stream.push(event.text)
       stream?.flush()
       const final = await run.final
+      if (signal?.aborted) throw cancelled()
       // Undeclared tools mean no parsed calls from the SDK: they are read out
       // of the text the model wrote, the same way the direct engine does it.
       const calls = TOOLS_IN_SYSTEM
@@ -601,7 +609,12 @@ export const answer = async (runtime, { messages, session, shown = [], base: sto
         const cite = toolCitation[call.name]
         if (cite && !citations.some((c) => c.file === cite.file)) citations.push(cite)
       }
+    } catch (error) {
+      // The SDK's own cancellation error is reported as the client's cancel.
+      if (signal?.aborted) throw cancelled()
+      throw error
     } finally {
+      signal?.removeEventListener('abort', stop)
       settle()
     }
   }

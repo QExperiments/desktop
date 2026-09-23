@@ -1,4 +1,7 @@
-// Provisioning step (req 1.2). Runs with the network up; `serve` never does.
+// Provisioning step (req 1.2). Runs with the network up; `serve` never does,
+// so every role the product answers with -- speech and vision included -- is
+// fetched here by default. `--core` fetches only the resident chat and
+// embeddings, for a machine that will never be asked to listen or look.
 import { createHash, randomUUID } from 'node:crypto'
 import { createReadStream, createWriteStream } from 'node:fs'
 import { mkdir, rename, rm } from 'node:fs/promises'
@@ -19,7 +22,7 @@ const { values: flags } = parseArgs({
     role: { type: 'string', multiple: true },
     source: { type: 'string', default: 'registry' },
     'from-dir': { type: 'string' },
-    all: { type: 'boolean', default: false },
+    core: { type: 'boolean', default: false },
     discard: { type: 'boolean', default: false },
   },
 })
@@ -121,7 +124,7 @@ const fetchAll = async () => {
   if (!chosen.tier) throw new Error(`${chosen.reason}; pass --tier S to fetch the smallest set anyway`)
 
   const wanted = flags.role ?? []
-  const targets = targetsFor(chosen.tier, { optional: flags.all || wanted.length > 0 })
+  const targets = targetsFor(chosen.tier, { optional: !flags.core || wanted.length > 0 })
     .filter((target) => wanted.length === 0 || wanted.includes(target.role))
   if (!targets.length) throw new Error(`no models defined for tier ${chosen.tier}`)
   logger.info({ tier: chosen.tier, reason: chosen.reason, roles: targets.map((target) => target.role) }, 'fetching weights')
@@ -135,7 +138,10 @@ const fetchAll = async () => {
       logger.info({ role: target.role, path: known.path }, 'already provisioned, skipping')
       continue
     }
-    const { path, source, assetSrc = null } = await fetchOne(target)
+    // The TTS weights are published on the QVAC registry only.
+    const viaRegistry = flags.source === 'https' && !target.https
+    if (viaRegistry) logger.warn({ role: target.role, constant: target.constant }, 'no HTTPS mirror; fetching from the registry')
+    const { path, source, assetSrc = null } = await (viaRegistry ? fromRegistry : fetchOne)(target)
     entries[key(target.role, target.tier)] = {
       role: target.role, tier: target.tier, constant: target.constant, modelType: target.modelType,
       source, path, assetSrc, bytes: target.bytes, sha256: target.sha256, fetchedAt: new Date().toISOString(),

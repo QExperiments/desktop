@@ -14,10 +14,24 @@ const openaiError = (reply, code, message, type) =>
 const headerValue = (value) => (Array.isArray(value) ? value[0] : value)
 
 export const createServer = (runtime) => {
-  const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } })
+  // Close drops every connection, not only the idle ones: a browser that had
+  // the chat page open keeps a socket Node does not count as idle, and close()
+  // waited on it for good. Anything still running was cancelled just before
+  // (runtime.drain in index.js).
+  const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' }, forceCloseConnections: true })
   const api = config.apiPrefix
   const sessions = createSessions(config.sessionsDir)
   const traces = createTraces(config.tracesDir)
+
+  // Every thrown error leaves in the OpenAI shape a stock client and the chat
+  // page read (`error.message`), keeping the status the thrower set: a 503 for
+  // a model this machine was never given, a 4xx from Fastify itself.
+  app.setErrorHandler((error, request, reply) => {
+    const code = error.statusCode >= 400 ? error.statusCode : 500
+    if (code >= 500) request.log.error(error)
+    const type = error.cancelled ? 'cancelled' : code === 503 ? 'service_unavailable' : code < 500 ? 'invalid_request_error' : 'server_error'
+    return openaiError(reply, code, error.message, type)
+  })
 
   // A session's KV-cache file is worth keeping only while the chat is likely
   // to continue. When a new session starts, the files of every session past
@@ -29,15 +43,24 @@ export const createServer = (runtime) => {
     if (stale.length) app.log.info({ deleted: stale.length, kept: config.cachedSessions }, 'kv-cache pruned')
   }
 
-  // When the chat model is unloaded after residentIdleMs, the sessions' KV
-  // files go with it: reloaded, the SDK would prefill the whole history on top
-  // of the file it loads and double the context (see runtime unloadIdle). A
-  // fresh file from the stored turns costs one prefill and nothing else.
-  runtime.onIdleUnload?.(async (role) => {
-    if (role !== 'chat') return
+  // Every fresh load of the chat model -- at boot, after the idle unload, on a
+  // failover or a reconnect -- drops the sessions' KV files: loaded again, the
+  // SDK would prefill the whole history on top of a file it no longer knows
+  // the length of and double the context (see runtime freshChat). A fresh
+  // file from the stored turns costs one prefill and nothing else.
+  runtime.onChatLoad?.(async () => {
     const ids = (await sessions.list()).map(({ id }) => id)
     for (const id of ids) await runtime.deleteCache(kvCacheKey(id))
-    app.log.info({ deleted: ids.length }, 'kv-cache dropped with the idle chat model')
+    if (ids.length) app.log.info({ deleted: ids.length }, 'kv-cache dropped for the freshly loaded chat model')
+  })
+
+  // Routes that need a model answer 503 until the runtime is ready: before
+  // that the tier is unknown, and a request would load the wrong model or
+  // fail with a 500. Also true again once a shutdown has started.
+  const modelRoutes = ['/chat/', '/audio/', '/images/'].map((path) => `${api}${path}`)
+  app.addHook('onRequest', async (request, reply) => {
+    if (!modelRoutes.some((prefix) => request.url.startsWith(prefix)) || runtime.snapshot().ready) return
+    return openaiError(reply, 503, 'models are still loading', 'service_unavailable')
   })
 
   app.register(multipart, { limits: { fileSize: 32 * 1024 * 1024 } })
@@ -49,7 +72,18 @@ export const createServer = (runtime) => {
       .then((ui) => ui.registerUi(scope, runtime))
       .catch((error) => app.log.warn({ err: error.message }, 'ui not in this build; serving the API only')))
   }
-  app.register(async (scope) => registerMedia(scope, runtime, sessions))
+  // Turns in flight by the id the client got in x-request-id. A turn stops,
+  // unsaved, when its client disconnects (a fetch aborted by the Stop button,
+  // a closed tab, a timeout) or when POST /v1/cancel/<id> names it.
+  const inflight = new Map()
+  const track = (id, reply) => {
+    const controller = new AbortController()
+    inflight.set(id, controller)
+    reply.raw.on('close', () => { if (!reply.raw.writableFinished) controller.abort() })
+    return { signal: controller.signal, done: () => inflight.delete(id) }
+  }
+
+  app.register(async (scope) => registerMedia(scope, runtime, sessions, track))
 
   app.get(`${api}/models`, (_request, reply) => {
     const state = runtime.snapshot()
@@ -88,6 +122,12 @@ export const createServer = (runtime) => {
   })
 
   app.post(`${api}/cancel/:requestId`, async (request, reply) => {
+    const turn = inflight.get(request.params.requestId)
+    if (turn) {
+      turn.abort()
+      return { cancelled: true, requestId: request.params.requestId, kind: 'turn' }
+    }
+    // An SDK request id straight from /health: a load, a download, one inference.
     const entry = await runtime.cancel(request.params.requestId)
     if (!entry) return openaiError(reply, 404, `no in-flight request ${request.params.requestId}`, 'not_found')
     return { cancelled: true, requestId: entry.requestId, kind: entry.kind, role: entry.role }
@@ -123,6 +163,19 @@ export const createServer = (runtime) => {
     if (session !== undefined && !isSessionId(session)) {
       return openaiError(reply, 400, 'x-session-id must be 1 to 64 characters of letters, digits, _ . or -', 'invalid_request_error')
     }
+    const id = `chatcmpl-${randomUUID()}`
+    const tracked = track(id, reply)
+    // Held until the turn is saved; see sessions.lock.
+    const unlock = session ? await sessions.lock(session) : null
+    try {
+      return await runTurn(request, reply, { messages, lastUser, query, session, id, signal: tracked.signal })
+    } finally {
+      unlock?.()
+      tracked.done()
+    }
+  })
+
+  const runTurn = async (request, reply, { messages, lastUser, query, session, id, signal }) => {
     const stored = session ? await sessions.context(session) : null
     const prior = stored
       ? stored.messages
@@ -135,7 +188,6 @@ export const createServer = (runtime) => {
     // trim dropped everything before it (src/chat/answer.js).
     const from = stored?.from ?? 0
 
-    const id = `chatcmpl-${randomUUID()}`
     const created = Math.floor(Date.now() / 1000)
     const evalRun = headerValue(request.headers['x-eval-run'])
 
@@ -146,9 +198,9 @@ export const createServer = (runtime) => {
       const stats = { ...result.stats, rss }
       if (session) {
         const turn = { kind: 'text', query, answer: result.text, citations: result.citations, messages: result.messages, shown: result.hits.filter((hit) => !hit.reused).map((hit) => hit.id), base: result.base, from: result.from, requestId: id, usage: result.usage, stats }
-        sessions.append(session, turn)
-          .then((saved) => (saved?.turns.length === 1 ? pruneCaches() : null))
-          .catch((error) => request.log.warn(error))
+        // Saved before the answer ends, so the next turn reads it back.
+        const saved = await sessions.append(session, turn).catch((error) => request.log.warn(error))
+        if (saved?.turns.length === 1) pruneCaches().catch((error) => request.log.warn(error))
       }
       if (evalRun) {
         const trace = { id, run: evalRun, session: session ?? null, at: new Date().toISOString(), query, text: result.text, citations: result.citations, hits: result.hits, messages: result.messages, rounds: result.rounds, retrieval: result.retrieval, usage: result.usage, stats }
@@ -182,6 +234,7 @@ export const createServer = (runtime) => {
           base,
           from,
           generationParams,
+          signal,
           onDelta: (content) => {
             if (first && content.trim() === '') return // the model's leading blank lines
             if (first) chunk({ role: 'assistant' })
@@ -198,15 +251,15 @@ export const createServer = (runtime) => {
         const stats = await settle(result)
         chunk({ citations }, 'stop', { grounded: citations.length > 0, usage: result.usage, stats })
       } catch (error) {
-        request.log.error(error)
-        send({ error: { message: error.message, type: 'server_error' } })
+        if (!error.cancelled) request.log.error(error)
+        send({ error: { message: error.message, type: error.cancelled ? 'cancelled' : 'server_error' } })
       }
       reply.raw.write('data: [DONE]\n\n')
       reply.raw.end()
       return reply
     }
 
-    const result = await answer(runtime, { messages: [...prior, { role: 'user', content: query }], session, shown, base, from, generationParams })
+    const result = await answer(runtime, { messages: [...prior, { role: 'user', content: query }], session, shown, base, from, generationParams, signal })
     const { text, citations } = result
     const stats = await settle(result)
 
@@ -220,7 +273,7 @@ export const createServer = (runtime) => {
       usage: result.usage,
       stats,
     }
-  })
+  }
 
   return app
 }

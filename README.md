@@ -26,14 +26,12 @@ are.
 
 ## Voice and vision
 
-Speech and vision models are optional: fetch them with `--all`, and the
-server loads each one on the first request and unloads it five minutes
-after the last. The fleet laptop cannot hold a vision model next to the
-chat model, so it does not try.
+`npm run models:fetch` provisions the speech and vision models with the
+rest, because `serve` runs without the network. The server loads each one
+on the first request and unloads it five minutes after the last. A request
+for a model that was never fetched answers 503 with the command to run.
 
 ```bash
-npm run models:fetch -- --all
-
 # speak a sentence
 curl -X POST http://127.0.0.1:11434/v1/audio/speech \
   -H 'content-type: application/json' \
@@ -47,7 +45,7 @@ curl -X POST http://127.0.0.1:11434/v1/audio/ask -F language=en -F file=@questio
 
 # a photographed nameplate or broken part
 curl -X POST http://127.0.0.1:11434/v1/images/ask \
-  -F 'question=What is the part number?' -F file=@nameplate.png
+  -F 'query=What is the part number?' -F file=@nameplate.png
 ```
 
 The answers the loop speaks are grounded in whatever `npm run corpus:ingest`
@@ -55,7 +53,9 @@ indexed: the top chunks go into the prompt and the `citations` array names
 their files, relative to the corpus root.
 
 Languages are detected rather than declared. Transcription quality
-depends on the tier: whisper-tiny on S, whisper-base on M.
+depends on the tier: whisper-tiny on S, whisper-base on M. Speech is
+Supertonic 3, which reads English, Russian or German text aloud without
+being told the language; Supertonic 2 refused Cyrillic outright.
 
 ## P2P inference
 
@@ -99,8 +99,9 @@ provider, bring it back): [docs-final/p2p-test.md](docs-final/p2p-test.md).
 
 ## Requirements
 
-Node.js 22.17 or newer (`.nvmrc` pins the version used here). Roughly 1 GB
-of disk for the smallest tier, 2 GB for the fleet tier.
+Node.js 22.17 or newer (`.nvmrc` pins the version used here). Roughly
+1.4 GB of disk for the smallest tier, 2.2 GB for the fleet tier, speech
+and vision included.
 
 ## Quick start
 
@@ -156,9 +157,9 @@ the weights come from HuggingFace, a direct HTTPS mirror.
 | `--source fs --from-dir DIR` | a directory the MDM pipeline provisioned |
 
 ```bash
-npm run models:fetch -- --tier S            # smallest set, ~0.7 GB
-npm run models:fetch -- --source https
-npm run models:fetch -- --all               # include the on-demand roles
+npm run models:fetch -- --tier S            # smallest set, ~1.4 GB
+npm run models:fetch -- --source https      # TTS has no mirror and still comes from the registry
+npm run models:fetch -- --core              # chat and embeddings only: no speech, no vision
 ```
 
 Ctrl+C cancels the download in flight and keeps the partial file; the next
