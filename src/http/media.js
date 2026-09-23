@@ -27,7 +27,7 @@ const field = (upload, name, fallback) => upload.fields?.[name]?.value ?? fallba
 const badSession = (reply) =>
   reply.code(400).send({ error: { message: 'session must be 1 to 64 characters of letters, digits, _ . or -', type: 'invalid_request_error' } })
 
-export const registerMedia = (app, runtime, sessions, track) => {
+export const registerMedia = (app, runtime, sessions, track, forget) => {
   const api = config.apiPrefix
 
   const upload = async (request, reply) => {
@@ -72,6 +72,7 @@ export const registerMedia = (app, runtime, sessions, track) => {
     const unlock = session ? await sessions.lock(session) : null
     let spoken
     let pcm
+    let saved = false
     try {
       // No client history on this route: earlier turns of the session come
       // from the store, with the compaction's base and window start so the
@@ -85,8 +86,11 @@ export const registerMedia = (app, runtime, sessions, track) => {
       if (session) {
         const shown = spoken.hits.filter((hit) => !hit.reused).map((hit) => hit.id)
         await sessions.append(session, { kind: 'voice', query, answer: spoken.text, citations: spoken.citations, messages: spoken.messages, shown, base: spoken.base, from: spoken.from })
+        saved = true
       }
     } finally {
+      // Stopped while the answer was spoken, or TTS failed: see forget in server.js.
+      if (session && !saved) await forget(session)
       unlock?.()
       tracked.done()
     }
