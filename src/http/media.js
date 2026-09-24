@@ -14,10 +14,13 @@ const SAMPLE_RATE = 24_000
 
 // Uploads go to a private temp file, are handed to the SDK by path and deleted
 // straight after. Audio and photos never land in the project tree or the logs.
-const withUpload = async (upload, use) => {
+// `check` sees the bytes first and throws to refuse them.
+const withUpload = async (upload, use, check) => {
+  const buffer = await upload.toBuffer()
+  check?.(buffer)
   const dir = await mkdtemp(join(tmpdir(), 'meridian-'))
   const path = join(dir, upload.filename || randomUUID())
-  await writeFile(path, await upload.toBuffer())
+  await writeFile(path, buffer)
   try {
     return await use(path)
   } finally {
@@ -26,6 +29,18 @@ const withUpload = async (upload, use) => {
 }
 
 const field = (upload, name, fallback) => upload.fields?.[name]?.value ?? fallback
+
+// The vision model reads images with stb_image inside llama.cpp, which decodes
+// these formats by their first bytes, whatever the file is called. WebP, HEIC
+// and AVIF it cannot: corpus pictures/pic2.png is a WebP, and asking about it
+// failed with "[MtmdLlm] Failed to load media" as a 500.
+const DECODABLE = [[0xff, 0xd8, 0xff], [0x89, 0x50, 0x4e, 0x47], [0x47, 0x49, 0x46], [0x42, 0x4d]]
+const decodableImage = (buffer) => {
+  if (DECODABLE.some((magic) => magic.every((byte, i) => buffer[i] === byte))) return
+  const kind = buffer.subarray(8, 12).toString('latin1') === 'WEBP' ? 'WebP'
+    : buffer.subarray(4, 8).toString('latin1') === 'ftyp' ? 'HEIC/AVIF' : 'this'
+  throw Object.assign(new Error(`${kind} images are not supported; send JPEG, PNG, GIF or BMP`), { statusCode: 415 })
+}
 
 const badSession = (reply) =>
   reply.code(400).send({ error: { message: 'session must be 1 to 64 characters of letters, digits, _ . or -', type: 'invalid_request_error' } })
@@ -124,7 +139,7 @@ export const registerMedia = (app, runtime, sessions, track, forget) => {
     // what follows that second </think>.
     const reasoning = config.visionReasoningBudget
     const generationParams = reasoning >= 0 ? { reasoning_budget: reasoning } : {}
-    const seen = await withUpload(part, (path) => runtime.look({ prompt: query, imagePath: path, captureThinking: true, generationParams }))
+    const seen = await withUpload(part, (path) => runtime.look({ prompt: query, imagePath: path, captureThinking: true, generationParams }), decodableImage)
     const answer = stripThinking(String(seen.text)).trim()
     // The numbers a chat turn reports (src/chat/stats.js), from the one vision
     // round, plus the two only this route has: the on-demand load and the
