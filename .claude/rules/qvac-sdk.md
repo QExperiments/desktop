@@ -1,7 +1,8 @@
 # QVAC SDK
 
-Package: `@qvac/sdk`. Runtimes: **Node.js** and **Bare**. Docs:
-https://docs.qvac.tether.io — for agents, https://docs.qvac.tether.io/llms-full.txt
+Package: `@qvac/sdk`. Runtimes: **Node.js** and **Bare**. Docs: linked
+from https://www.npmjs.com/package/@qvac/sdk, including the `llms-full.txt`
+meant for agents.
 
 Sibling `fibiom-electron` shows a working Electron integration. Copy **SDK
 usage**, not the app: `loadModel` / `completion` / `embed` / `transcribe` /

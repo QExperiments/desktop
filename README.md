@@ -7,7 +7,7 @@ Meridian controls. No cloud AI APIs.
 This is a **qualification exercise** for prospective QVAC Solutions service
 providers. It is provisional and informative only: completing it grants no
 QVAC Solutions Provider status and authorizes no claim of partnership with
-Tether. The client, Meridian Components, is fictional.
+the SDK vendor. The client, Meridian Components, is fictional.
 
 ## What works today
 
@@ -137,7 +137,7 @@ and the eval harness need. Everything is local; nothing here downloads.
 | `DELETE /v1/sessions/:id` | forgets a chat: its turns and its KV-cache file |
 | `POST /v1/cancel/:requestId` | cancels a load or inference in flight |
 | `GET /v1/models/catalog` | every role and tier of `models.json` with what is provisioned, what the registry knows and which tiers this machine affords (see Models) |
-| `POST /v1/audio/transcriptions`, `/v1/audio/speech`, `/v1/audio/ask`, `/v1/images/ask` | voice and vision (below) |
+| `POST /v1/audio/transcriptions`, `/v1/audio/speech`, `/v1/audio/ask`, `/v1/images/ask` | voice and vision (below); `/v1/images/ask` returns `usage` and `stats` like a chat turn, plus `stats.load_ms` (the on-demand vision load) and `stats.thinking_chars` |
 | `GET /health` | tier, mode, loaded models, resident roles unloaded while idle, in-flight requests |
 | `GET /`, `GET /ui` | chat page and test console; `MERIDIAN_UI=0` serves the API alone |
 
@@ -208,6 +208,7 @@ Retrieval has three switches, read once at start and compared by the eval
 | `MERIDIAN_DIRECT_PREDICT` | `4096` generated tokens per round on the direct engine, reasoning included | any positive number |
 | `MERIDIAN_CHAT_PREDICT` | `4096` generated tokens per round on the SDK path, reasoning included | any positive number; below ~1024 the thinking of a hard question eats the answer |
 | `MERIDIAN_CHAT_REASONING_BUDGET` | `512` tokens of reasoning per round; the sampler closes `</think>` itself once it is spent | `-1` leaves the channel open, `0` switches it off; `/no_think` only damps Qwen3.5, it does not stop it |
+| `MERIDIAN_VISION_REASONING_BUDGET` | `0`: the vision model answers `/v1/images/ask` without reasoning first | same switch as `MERIDIAN_CHAT_REASONING_BUDGET`; `-1` leaves it open, which ran a photo's turn to 33–56 s and once to the 4096 of the vision `ctx_size`. A positive cap barely helps: the model goes on reasoning in the answer after the sampler closes the block |
 | `MERIDIAN_PROFILE` | unset: the SDK profiler is off | `summary` aggregates operation phases, `verbose` adds a 1000-event ring buffer with memory and GPU gauges. `GET /v1/profile` reads it live; a dump lands in `data/profiles/` when serve stops |
 | `MERIDIAN_CHAT_DISCARD` | `0`: a turn that crosses the context throws `context overflow` and the session's KV state goes with it | tokens the addon's sliding window drops off the front instead (`modelConfig.n_discarded`); the system prompt is protected, the oldest turns are not, and nothing tells the application what was lost (docs/todo-6.md) |
 | `MERIDIAN_CHAT_CTX` | the tier's own `ctx_size` from `models.json` (16384 on M) | overrides it for the chat role; it must still hold the largest single prompt, or a replay after a lost cache overflows |
@@ -282,6 +283,10 @@ the cases, metrics and the judge: [evals/README.md](evals/README.md).
 | `src/audio/wav.js` | PCM in and out of the RIFF container every client expects |
 | `scripts/models-fetch.js` | provisioning, the one step that uses the network |
 | `models.json` | roles, tiers, checksums, mirrors |
-| `qvac-eval.json` | the contract the Tether harness runs |
+| `qvac-eval.json` | the contract the evaluator's harness runs |
 | `evals/` | our own eval harness: cases, runner, metrics, judge, report |
 | `qvac.config.json` | the QVAC plugins this build includes |
+
+## License
+
+Apache License 2.0, see [LICENSE](LICENSE).

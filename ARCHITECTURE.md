@@ -1,6 +1,6 @@
 # Architecture — Meridian on-device assistant
 
-Draft for approval, 2026-09-15. SDK facts verified against `@qvac/sdk` 0.19.1 / 0.18.2 tarballs and docs.qvac.tether.io.
+Draft for approval, 2026-09-15. SDK facts verified against `@qvac/sdk` 0.19.1 / 0.18.2 tarballs and the SDK docs.
 
 ## 1. Shape of the product
 
@@ -25,7 +25,7 @@ Draft for approval, 2026-09-15. SDK facts verified against `@qvac/sdk` 0.19.1 / 
 
 | # | Decision | Why |
 |---|---|---|
-| D1 | **Pin `@qvac/sdk@0.18.2` + `@qvac/cli@0.12.0`.** Ask Tether at kickoff. Contingency: 0.19 + own Hyperswarm delegation in `src/p2p/`. | Only released version with the delegation API the brief names. SDK is isolated in one folder, so switching is contained. |
+| D1 | **Pin `@qvac/sdk@0.18.2` + `@qvac/cli@0.12.0`.** Ask the SDK vendor at kickoff. Contingency: 0.19 + own Hyperswarm delegation in `src/p2p/`. | Only released version with the delegation API the brief names. SDK is isolated in one folder, so switching is contained. |
 | D2 | Node hosts HTTP + SQLite; inference runs in the SDK's Bare worker; a second entry `entry/bare.mjs` runs the same runtime in-process on Bare for the provider box. | Covers "Node.js and Bare" honestly; core never imports `node:*`. |
 | D3 | `src/runtime/` is the only module that sees the SDK (`createRuntime({ sdk })`). `http/` imports only `chat/answer.mjs`. | Makes a "temporary pass-through" impossible to ship. |
 | D4 | Fastify, ESM, plain JS + JSDoc (`tsc --checkJs`). | Already in repo, same as `@qvac/cli`; no build step for Bare. |
@@ -147,12 +147,12 @@ Retrieval (as shipped): vector top-5 ∪ BM25 top-5 → reciprocal-rank fusion (
 
 ## 10. Risks and questions
 
-- **R1** Delegation only in 0.18.x → D1, ask Tether, contingency ready.
+- **R1** Delegation only in 0.18.x → D1, ask the SDK vendor, contingency ready.
 - **R2** Tool-calling of a 2B model → unconditional retrieval, strict Zod, measured in Stage 1, fallback model.
 - **R3** Intel iGPU without usable Vulkan → CPU inference; tier S/M sizes, small `ctx_size`, streaming.
 - **R4** `sqlite-vec` binary per OS/arch → `VectorStore` interface, LanceDB fallback.
 - **Assumptions:** corpus is tens of MB; one user per machine; Windows/macOS laptops, Linux provider.
-- **Ask Tether:** is 0.18.x delegation expected, or is there a 0.19+ replacement? **Ask Raj:** log retention, `data/` location, MDM package format; whether the eval harness may grade answers with a hosted model (`evals/` has an opt-in `--judge-backend claude-cli` that sends the fictional eval corpus excerpts to Anthropic; the product never does). **Ask Dana:** corpus update cadence, field languages; whether a first answer that takes about 5 s extra after an hour of no use is acceptable (the chat model unloads after that hour to free 1.5 GB on the fleet laptop; `MERIDIAN_RESIDENT_IDLE_MS`).
+- **Ask the SDK vendor:** is 0.18.x delegation expected, or is there a 0.19+ replacement? **Ask Raj:** log retention, `data/` location, MDM package format; whether the eval harness may grade answers with a hosted model (`evals/` has an opt-in `--judge-backend claude-cli` that sends the fictional eval corpus excerpts to Anthropic; the product never does). **Ask Dana:** corpus update cadence, field languages; whether a first answer that takes about 5 s extra after an hour of no use is acceptable (the chat model unloads after that hour to free 1.5 GB on the fleet laptop; `MERIDIAN_RESIDENT_IDLE_MS`).
 
 ## 11. Stages
 
