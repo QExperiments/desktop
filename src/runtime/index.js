@@ -527,8 +527,13 @@ export const createRuntime = ({ log = logger } = {}) => {
       () => sdk.textToSpeech({ modelId, text, inputType: 'text', stream: false, ...params }),
       (run) => run.buffer)))
 
-  const look = ({ prompt, imagePath, ...params }) => inLane('vision', () =>
-    hold('vision', async (modelId) => {
+  // The answer comes back with the SDK's completionStats and how long the
+  // model took to be handed out: vision is loaded on demand, so the first
+  // image after an idle unload pays for the load and the rest do not.
+  const look = ({ prompt, imagePath, ...params }) => inLane('vision', () => {
+    const asked = Date.now()
+    return hold('vision', async (modelId) => {
+      const loadMs = Date.now() - asked
       const run = sdk.completion({
         modelId,
         history: [{ role: 'user', content: prompt, attachments: [{ path: imagePath }] }],
@@ -538,11 +543,13 @@ export const createRuntime = ({ log = logger } = {}) => {
       registry.add(run.requestId, { kind: 'inference', role: 'vision' })
 
       try {
-        return (await run.final).contentText
+        const final = await run.final
+        return { text: final.contentText ?? '', thinkingChars: (final.thinkingText ?? '').length, stats: final.stats ?? null, loadMs }
       } finally {
         registry.drop(run.requestId)
       }
-    }))
+    })
+  })
 
   // GET /v1/models/catalog: read-only, from models.json, the manifest and the
   // registry snapshot `models:list --refresh` left on disk. Never downloads.

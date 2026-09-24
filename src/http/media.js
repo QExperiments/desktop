@@ -4,7 +4,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pcmToWav } from '../audio/wav.js'
 import { answer, cancelled } from '../chat/answer.js'
+import { summarize } from '../chat/stats.js'
 import { config } from '../config.js'
+import { treeRss } from '../system/rss.js'
 import { isSessionId } from './sessions.js'
 
 const SAMPLE_RATE = 24_000
@@ -106,6 +108,7 @@ export const registerMedia = (app, runtime, sessions, track, forget) => {
 
   // 4.3 — a photo of a nameplate or a broken part, asked about in words.
   app.post(`${api}/images/ask`, async (request, reply) => {
+    const startedAt = Date.now()
     const part = await upload(request, reply)
     if (!part) return reply
     const query = field(part, 'query', 'Describe this image in one sentence.')
@@ -114,8 +117,14 @@ export const registerMedia = (app, runtime, sessions, track, forget) => {
     // A small preview the chat page made, so an earlier chat can show the photo again.
     const thumb = field(part, 'thumb', '')
     // Qwen3.5 thinks before it answers; captured separately, the scratchpad stays out of the reply.
-    const text = await withUpload(part, (path) => runtime.look({ prompt: query, imagePath: path, captureThinking: true }))
-    const answer = String(text).trim()
+    const seen = await withUpload(part, (path) => runtime.look({ prompt: query, imagePath: path, captureThinking: true }))
+    const answer = String(seen.text).trim()
+    // The numbers a chat turn reports (src/chat/stats.js), from the one vision
+    // round, plus the two only this route has: the on-demand load and the
+    // reasoning the answer cost. Vision runs without a KV key, so cache_ratio
+    // is 0 and context_tokens is the image, the question and what it wrote.
+    const { usage, stats: numbers } = summarize({ startedAt, rounds: [{ stats: seen.stats }] })
+    const stats = { ...numbers, load_ms: seen.loadMs, thinking_chars: seen.thinkingChars, rss: await treeRss() }
     if (session) {
       // The chat model never saw the photo; its history gets the question and
       // answer as plain text, appended between turns rather than inside one.
@@ -123,13 +132,16 @@ export const registerMedia = (app, runtime, sessions, track, forget) => {
       try {
         await sessions.append(session, {
           kind: 'image', query, answer, citations: [],
-          messages: [{ role: 'user', content: query }, { role: 'assistant', content: answer }], shown: [],
+          messages: [{ role: 'user', content: query }, { role: 'assistant', content: answer }], shown: [], usage, stats,
           ...(thumb.startsWith('data:image/') && thumb.length <= 200_000 ? { thumb } : {}),
         })
       } finally {
         unlock()
       }
     }
-    return { session: session || null, query, answer }
+    // One line of numbers, as a chat turn logs; never the question or the answer.
+    const { tool_calls, ...logged } = stats
+    request.log.info({ session: session || null, usage, stats: logged }, 'vision')
+    return { session: session || null, query, answer, usage, stats }
   })
 }

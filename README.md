@@ -137,7 +137,7 @@ and the eval harness need. Everything is local; nothing here downloads.
 | `DELETE /v1/sessions/:id` | forgets a chat: its turns and its KV-cache file |
 | `POST /v1/cancel/:requestId` | cancels a load or inference in flight |
 | `GET /v1/models/catalog` | every role and tier of `models.json` with what is provisioned, what the registry knows and which tiers this machine affords (see Models) |
-| `POST /v1/audio/transcriptions`, `/v1/audio/speech`, `/v1/audio/ask`, `/v1/images/ask` | voice and vision (below) |
+| `POST /v1/audio/transcriptions`, `/v1/audio/speech`, `/v1/audio/ask`, `/v1/images/ask` | voice and vision (below); `/v1/images/ask` returns `usage` and `stats` like a chat turn, plus `stats.load_ms` (the on-demand vision load) and `stats.thinking_chars` |
 | `GET /health` | tier, mode, loaded models, resident roles unloaded while idle, in-flight requests |
 | `GET /`, `GET /ui` | chat page and test console; `MERIDIAN_UI=0` serves the API alone |
 
