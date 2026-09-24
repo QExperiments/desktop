@@ -17,7 +17,7 @@ The submission is scored by pointing a stock OpenAI client at us.
 Exact fields: `version`, `setup`, `start`, `shutdown`, `baseUrl`,
 `readyPath`, `readyTimeoutSec`, `models.chat`, `models.embedding`.
 
-Declared defaults we must honor unless Tether agrees otherwise:
+Declared defaults we must honor unless the evaluator agrees otherwise:
 
 - `baseUrl`: `http://127.0.0.1:11434/v1`
 - `readyPath`: `/models` (poll until 200, timeout 600s)

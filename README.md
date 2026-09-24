@@ -7,7 +7,7 @@ Meridian controls. No cloud AI APIs.
 This is a **qualification exercise** for prospective QVAC Solutions service
 providers. It is provisional and informative only: completing it grants no
 QVAC Solutions Provider status and authorizes no claim of partnership with
-Tether. The client, Meridian Components, is fictional.
+the SDK vendor. The client, Meridian Components, is fictional.
 
 ## What works today
 
@@ -283,6 +283,6 @@ the cases, metrics and the judge: [evals/README.md](evals/README.md).
 | `src/audio/wav.js` | PCM in and out of the RIFF container every client expects |
 | `scripts/models-fetch.js` | provisioning, the one step that uses the network |
 | `models.json` | roles, tiers, checksums, mirrors |
-| `qvac-eval.json` | the contract the Tether harness runs |
+| `qvac-eval.json` | the contract the evaluator's harness runs |
 | `evals/` | our own eval harness: cases, runner, metrics, judge, report |
 | `qvac.config.json` | the QVAC plugins this build includes |

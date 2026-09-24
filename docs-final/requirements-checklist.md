@@ -295,7 +295,7 @@ start before the quality debt under "Where this stands" is paid.
 - [ ] How the real engagement would be staffed: roles, headcount, duration,
   client-facing lead
 - [~] Relevant assumptions and discovery questions
-  *`ARCHITECTURE.md` lists assumptions and questions for Tether, Raj and Dana.
+  *`ARCHITECTURE.md` lists assumptions and questions for the SDK vendor, Raj and Dana.
   Not collected into a standalone artifact.*
 
 ---

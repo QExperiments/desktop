@@ -11,11 +11,11 @@ Format: context, decision, consequences.
 `assessModelFit` exists only from 0.19.
 
 **Decision.** Pin 0.18.2 and keep every SDK call inside `src/runtime/`.
-Raise the version question with Tether at kickoff.
+Raise the version question with the SDK vendor at kickoff.
 
 **Consequences.** P2P delegation is implementable as written. Tier fit is
 computed by us from `getSystemResources()` instead of `assessModelFit`.
-If Tether confirms a 0.19 replacement, only `src/runtime/` changes.
+If the SDK vendor confirms a 0.19 replacement, only `src/runtime/` changes.
 
 ## ADR-002 — Three model sources, one manifest, no network in `serve`
 
