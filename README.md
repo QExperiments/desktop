@@ -286,3 +286,7 @@ the cases, metrics and the judge: [evals/README.md](evals/README.md).
 | `qvac-eval.json` | the contract the evaluator's harness runs |
 | `evals/` | our own eval harness: cases, runner, metrics, judge, report |
 | `qvac.config.json` | the QVAC plugins this build includes |
+
+## License
+
+Apache License 2.0, see [LICENSE](LICENSE).
