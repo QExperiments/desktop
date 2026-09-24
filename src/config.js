@@ -159,6 +159,16 @@ export const config = {
   // sampler enforces by emitting </think> itself. 512 is enough for the tool
   // choice and short of the runaway that cost one turn 43 s and an empty answer.
   chatReasoningBudget: Number(process.env.MERIDIAN_CHAT_REASONING_BUDGET ?? 512),
+  // The same switch for the vision model (POST /v1/images/ask); 0, the
+  // default, turns its reasoning off. Measured 2026-09-24 on tier L with a
+  // 4032x2258 photo and "What kind of equipment is this, and what should I
+  // check?": left open, it thought for 3.5 to 8.9 thousand characters, 33 to
+  // 56 s, and the longest run filled the 4096 of ctx_size with 731 characters
+  // of answer left. A positive cap does not shorten that: once the sampler
+  // closes the block the model goes on reasoning in the answer and closes it
+  // again itself, so 128 to 1024 still generated 700 to 1700 tokens, 20 to 46 s.
+  // Off, the same turn took 18.5 s: 571 tokens, no reasoning, 2326 of context.
+  visionReasoningBudget: Number(process.env.MERIDIAN_VISION_REASONING_BUDGET ?? 0),
   // Sampler penalty on tokens already generated. 0 leaves it to the addon,
   // which applies none: 15 turns of the 2026-09-21 run repeated one paragraph
   // until they hit `predict` -- 4095 tokens, 55 to 84 seconds each.

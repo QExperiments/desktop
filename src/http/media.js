@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { pcmToWav } from '../audio/wav.js'
 import { answer, cancelled } from '../chat/answer.js'
 import { summarize } from '../chat/stats.js'
+import { stripThinking } from '../chat/tool-markup.js'
 import { config } from '../config.js'
 import { treeRss } from '../system/rss.js'
 import { isSessionId } from './sessions.js'
@@ -116,9 +117,15 @@ export const registerMedia = (app, runtime, sessions, track, forget) => {
     if (session && !isSessionId(session)) return badSession(reply)
     // A small preview the chat page made, so an earlier chat can show the photo again.
     const thumb = field(part, 'thumb', '')
-    // Qwen3.5 thinks before it answers; captured separately, the scratchpad stays out of the reply.
-    const seen = await withUpload(part, (path) => runtime.look({ prompt: query, imagePath: path, captureThinking: true }))
-    const answer = String(seen.text).trim()
+    // Qwen3.5 thinks before it answers; captured separately, the scratchpad
+    // stays out of the reply. Its length is config.visionReasoningBudget's.
+    // Under a positive cap the model can go on reasoning after the sampler
+    // closed the block and close it a second time itself: stripThinking keeps
+    // what follows that second </think>.
+    const reasoning = config.visionReasoningBudget
+    const generationParams = reasoning >= 0 ? { reasoning_budget: reasoning } : {}
+    const seen = await withUpload(part, (path) => runtime.look({ prompt: query, imagePath: path, captureThinking: true, generationParams }))
+    const answer = stripThinking(String(seen.text)).trim()
     // The numbers a chat turn reports (src/chat/stats.js), from the one vision
     // round, plus the two only this route has: the on-demand load and the
     // reasoning the answer cost. Vision runs without a KV key, so cache_ratio
